@@ -43,6 +43,17 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
     Paused seeking also preserves the selected picture and resumes normally.
     The build also passes missing-device software fallback in QEMU
     (48 HEVC pictures, no drops).
+    Real WX5100 GPU timeout tests now pass software replay, paused seeking,
+    hardware decoder recreation through the existing preference, resumed
+    playback and normal completion in the same process. This covers H.264,
+    HEVC Main and Main 10 readback faults, plus a Main 10 output-clear fault.
+    The latter reported one dropped frame during recovery; the other three
+    reported none. The paused software and recreated hardware pictures match
+    pixel for pixel. Decoder replacement waits for the demux seek to flush
+    old packets, and hardware catch-up stays within known video timestamps
+    so it cannot suppress every remaining picture near the end of a film.
+    These are private-build tests with a test-only timeout add-on; airTime's
+    presentation path still uses CPU scaling and drawing.
   * **GeForce** — NVDEC (the `nvdec` add-on):
     8-bit 4:2:0 progressive H.264, and HEVC Main and Main 10 up to 8K.
     Ten-bit pictures come over as P010, so HDR films keep their depth for

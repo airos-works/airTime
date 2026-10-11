@@ -369,6 +369,7 @@ Player::Open(const char* path, BString* error)
 	fScanning = false;
 	fEnded = false;
 	fEndOfFile = false;
+	fLastVideoPacketPts = kNoTime;
 	fShowNextFrame = true;
 	fLastShownPts = 0;
 	fFramesShown = 0;
@@ -1346,6 +1347,7 @@ Player::_PerformSeek()
 	{
 		std::lock_guard<std::mutex> lock(fLock);
 		fEndOfFile = false;
+		fLastVideoPacketPts = kNoTime;
 		fScanPacketSent = false;
 		fScanHitEnd = false;
 		fVideoSkipSerial = accurate ? videoSerial : -1;
@@ -1382,6 +1384,14 @@ void
 Player::_RouteVideoPacket(AVPacket* packet)
 {
 	AVStream* stream = fFormat->streams[fVideoStream];
+	int64 timestamp = packet->pts != AV_NOPTS_VALUE ? packet->pts : packet->dts;
+	bigtime_t pts = to_micros(timestamp, stream->time_base);
+	if (pts != kNoTime) {
+		std::lock_guard<std::mutex> lock(fLock);
+		pts -= fStartTime;
+		if (fLastVideoPacketPts == kNoTime || pts > fLastVideoPacketPts)
+			fLastVideoPacketPts = pts;
+	}
 
 	// Closed captions ride along in the video, so they are looked for in
 	// every picture, whichever decoder gets it.
@@ -1597,7 +1607,8 @@ Player::_FallBackToSoftware(const char* why, bigtime_t resumeTime)
 	}
 	{
 		// The packets the hardware swallowed are gone: read them again.
-		std::lock_guard<std::mutex> lock(fLock);
+		std::unique_lock<std::mutex> lock(fLock);
+		int previousSerial = fVideoQueue.Serial();
 		bigtime_t position = fPositionPending ? fPendingPosition
 			: resumeTime != kNoTime ? resumeTime : fLastShownPts;
 		_RequestSeekLocked(position, true, 0);
@@ -1608,6 +1619,11 @@ Player::_FallBackToSoftware(const char* why, bigtime_t resumeTime)
 		fHurryPatience = 3000000;
 		fHurryEased = 0;
 		fShowNextFrame = true;
+		// The new decoder has no reference pictures. The demux thread must
+		// finish seeking and discard the old packets before it can consume
+		// anything, even when the old queue still has buffered data.
+		while (!fQuit && !fVideoQueue.HasNewerSerial(previousSerial))
+			fWakeUp.wait_for(lock, std::chrono::milliseconds(20));
 	}
 	_Notify(kMsgPlayerDecoderChanged);
 }
@@ -1692,11 +1708,16 @@ Player::_VideoDecodeLoop()
 			resetSpeed();
 			hardwareWanted = fHardwareDecoding;
 			_CreateVideoDecoder();
-			std::lock_guard<std::mutex> lock(fLock);
+			std::unique_lock<std::mutex> lock(fLock);
+			int previousSerial = fVideoQueue.Serial();
 			bigtime_t position = fPositionPending ? fPendingPosition
 				: fLastShownPts;
 			_RequestSeekLocked(position, true, 0);
 			fShowNextFrame = true;
+			// In particular, a recreated hardware decoder must start at the
+			// seek's random-access picture, not a buffered mid-GOP packet.
+			while (!fQuit && !fVideoQueue.HasNewerSerial(previousSerial))
+				fWakeUp.wait_for(lock, std::chrono::milliseconds(20));
 			continue;
 		}
 
@@ -1726,13 +1747,21 @@ Player::_VideoDecodeLoop()
 			std::lock_guard<std::mutex> lock(fLock);
 			bigtime_t behind = master - lastDecodedPts;
 			if (valid && fPlaying && !fScanning && behind > 250000
-				&& fVideoSkipSerial != lastDecodedSerial) {
+				&& fVideoSkipSerial != lastDecodedSerial
+				&& fLastVideoPacketPts != kNoTime) {
 				bigtime_t target = master + behind / 2 + 100000;
-				fVideoSkipSerial = lastDecodedSerial;
-				fVideoSkipTime = target;
-				decoder->SetSkipBefore(target);
-				TRACE("airTime: the decoder is %.0f ms behind, no pictures "
-					"until %.3f\n", behind / 1000.0, target / 1e6);
+				// Never ask hardware to suppress every remaining picture.
+				// Its skipped output may contain no pixels, so EOF cannot show
+				// it later. A demuxed video timestamp bounds catch-up even when
+				// the duration is unknown or audio continues past the video.
+				target = std::min(target, fLastVideoPacketPts);
+				if (target > 0 && target > lastDecodedPts) {
+					fVideoSkipSerial = lastDecodedSerial;
+					fVideoSkipTime = target;
+					decoder->SetSkipBefore(target);
+					TRACE("airTime: the decoder is %.0f ms behind, no pictures "
+						"until %.3f\n", behind / 1000.0, target / 1e6);
+				}
 			}
 		}
 
