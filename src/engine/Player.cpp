@@ -369,6 +369,7 @@ Player::Open(const char* path, BString* error)
 	fScanning = false;
 	fEnded = false;
 	fEndOfFile = false;
+	fLastVideoPacketPts = kNoTime;
 	fShowNextFrame = true;
 	fLastShownPts = 0;
 	fFramesShown = 0;
@@ -1346,6 +1347,7 @@ Player::_PerformSeek()
 	{
 		std::lock_guard<std::mutex> lock(fLock);
 		fEndOfFile = false;
+		fLastVideoPacketPts = kNoTime;
 		fScanPacketSent = false;
 		fScanHitEnd = false;
 		fVideoSkipSerial = accurate ? videoSerial : -1;
@@ -1382,6 +1384,14 @@ void
 Player::_RouteVideoPacket(AVPacket* packet)
 {
 	AVStream* stream = fFormat->streams[fVideoStream];
+	int64 timestamp = packet->pts != AV_NOPTS_VALUE ? packet->pts : packet->dts;
+	bigtime_t pts = to_micros(timestamp, stream->time_base);
+	if (pts != kNoTime) {
+		std::lock_guard<std::mutex> lock(fLock);
+		pts -= fStartTime;
+		if (fLastVideoPacketPts == kNoTime || pts > fLastVideoPacketPts)
+			fLastVideoPacketPts = pts;
+	}
 
 	// Closed captions ride along in the video, so they are looked for in
 	// every picture, whichever decoder gets it.
@@ -1737,13 +1747,21 @@ Player::_VideoDecodeLoop()
 			std::lock_guard<std::mutex> lock(fLock);
 			bigtime_t behind = master - lastDecodedPts;
 			if (valid && fPlaying && !fScanning && behind > 250000
-				&& fVideoSkipSerial != lastDecodedSerial) {
+				&& fVideoSkipSerial != lastDecodedSerial
+				&& fLastVideoPacketPts != kNoTime) {
 				bigtime_t target = master + behind / 2 + 100000;
-				fVideoSkipSerial = lastDecodedSerial;
-				fVideoSkipTime = target;
-				decoder->SetSkipBefore(target);
-				TRACE("airTime: the decoder is %.0f ms behind, no pictures "
-					"until %.3f\n", behind / 1000.0, target / 1e6);
+				// Never ask hardware to suppress every remaining picture.
+				// Its skipped output may contain no pixels, so EOF cannot show
+				// it later. A demuxed video timestamp bounds catch-up even when
+				// the duration is unknown or audio continues past the video.
+				target = std::min(target, fLastVideoPacketPts);
+				if (target > 0 && target > lastDecodedPts) {
+					fVideoSkipSerial = lastDecodedSerial;
+					fVideoSkipTime = target;
+					decoder->SetSkipBefore(target);
+					TRACE("airTime: the decoder is %.0f ms behind, no pictures "
+						"until %.3f\n", behind / 1000.0, target / 1e6);
+				}
 			}
 		}
 

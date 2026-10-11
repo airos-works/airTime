@@ -205,6 +205,7 @@ private:
 
 			// Streams
 			int					fVideoStream;
+			bigtime_t			fLastVideoPacketPts = kNoTime;
 			int					fAudioStream;
 			TrackInfo			fVideoTrack;
 			std::vector<TrackInfo> fAudioTracks;
