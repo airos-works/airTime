@@ -1597,7 +1597,8 @@ Player::_FallBackToSoftware(const char* why, bigtime_t resumeTime)
 	}
 	{
 		// The packets the hardware swallowed are gone: read them again.
-		std::lock_guard<std::mutex> lock(fLock);
+		std::unique_lock<std::mutex> lock(fLock);
+		int previousSerial = fVideoQueue.Serial();
 		bigtime_t position = fPositionPending ? fPendingPosition
 			: resumeTime != kNoTime ? resumeTime : fLastShownPts;
 		_RequestSeekLocked(position, true, 0);
@@ -1608,6 +1609,11 @@ Player::_FallBackToSoftware(const char* why, bigtime_t resumeTime)
 		fHurryPatience = 3000000;
 		fHurryEased = 0;
 		fShowNextFrame = true;
+		// The new decoder has no reference pictures. The demux thread must
+		// finish seeking and discard the old packets before it can consume
+		// anything, even when the old queue still has buffered data.
+		while (!fQuit && !fVideoQueue.HasNewerSerial(previousSerial))
+			fWakeUp.wait_for(lock, std::chrono::milliseconds(20));
 	}
 	_Notify(kMsgPlayerDecoderChanged);
 }
@@ -1692,11 +1698,16 @@ Player::_VideoDecodeLoop()
 			resetSpeed();
 			hardwareWanted = fHardwareDecoding;
 			_CreateVideoDecoder();
-			std::lock_guard<std::mutex> lock(fLock);
+			std::unique_lock<std::mutex> lock(fLock);
+			int previousSerial = fVideoQueue.Serial();
 			bigtime_t position = fPositionPending ? fPendingPosition
 				: fLastShownPts;
 			_RequestSeekLocked(position, true, 0);
 			fShowNextFrame = true;
+			// In particular, a recreated hardware decoder must start at the
+			// seek's random-access picture, not a buffered mid-GOP packet.
+			while (!fQuit && !fVideoQueue.HasNewerSerial(previousSerial))
+				fWakeUp.wait_for(lock, std::chrono::milliseconds(20));
 			continue;
 		}
 
