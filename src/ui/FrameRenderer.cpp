@@ -6,6 +6,8 @@
 
 #include "FrameRenderer.h"
 
+#include <atomic>
+
 #include <algorithm>
 #include <math.h>
 #include <stdio.h>
@@ -48,7 +50,9 @@ FrameRenderer::FrameRenderer()
 	fSource(av_frame_alloc()),
 	fTarget(av_frame_alloc()),
 	fTransferKind(-1),
-	fPeak(0)
+	fPeak(0),
+	fTraceScaling(0),
+	fTraceMapping(0)
 {
 }
 
@@ -464,47 +468,75 @@ map_row(const ToneMap& map, const ColorMatrix& matrix, const uint16* luma,
 	const float* transfer = map.transfer;
 	int x = 0;
 #if defined(__aarch64__)
-	// Four pixels at a time: the arithmetic in vectors, the table lookups
-	// lane by lane. (HLG's gain is left to the plain code.)
-	if (!map.hlg) {
+	// In four passes over the row: the arithmetic in vectors, four pixels
+	// at a time, and the table lookups each on its own. Done together, four
+	// pixels at a time, the lookups chained loads lane by lane into vectors
+	// and the pixels were put together lane by lane, and a loop body as
+	// long as the Cortex-A76's reorder window could not overlap one group's
+	// chains with the next: 38-39 cycles a pixel there, 27-28 in passes,
+	// the pixels the same. (HLG's gain is left to the plain code.)
+	if (!map.hlg && width >= 4) {
+		int vectorWidth = width & ~3;
+		static thread_local std::vector<uint16> sIndices;
+		static thread_local std::vector<float> sLight;
+		sIndices.resize((size_t)vectorWidth * 3);
+		sLight.resize((size_t)vectorWidth * 3);
+		uint16* redIndex = sIndices.data();
+		uint16* greenIndex = redIndex + vectorWidth;
+		uint16* blueIndex = greenIndex + vectorWidth;
+		float* redLight = sLight.data();
+		float* greenLight = redLight + vectorWidth;
+		float* blueLight = greenLight + vectorWidth;
+
 		const float32x4_t zero = vdupq_n_f32(0);
 		const float32x4_t one = vdupq_n_f32(1);
 		const float32x4_t steps = vdupq_n_f32(4095);
 		const float32x4_t lumaOffset = vdupq_n_f32(matrix.lumaOffset);
 		const float32x4_t chromaOffset = vdupq_n_f32(32768);
+		const float lumaScale = matrix.lumaScale;
+		const float chromaScale = matrix.chromaScale;
+		const float redCr = matrix.redCr;
+		const float greenCb = matrix.greenCb;
+		const float greenCr = matrix.greenCr;
+		const float blueCb = matrix.blueCb;
+
+		// Y'CbCr to the R'G'B' codes' steps in the transfer table
+		for (int i = 0; i < vectorWidth; i += 4) {
+			float32x4_t l = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
+				vld1_u16(luma + i))), lumaOffset), lumaScale);
+			float32x4_t u = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
+				vld1_u16(cb + i))), chromaOffset), chromaScale);
+			float32x4_t v = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
+				vld1_u16(cr + i))), chromaOffset), chromaScale);
+			float32x4_t red = vfmaq_n_f32(l, v, redCr);
+			float32x4_t green = vfmaq_n_f32(vfmaq_n_f32(l, u, greenCb), v,
+				greenCr);
+			float32x4_t blue = vfmaq_n_f32(l, u, blueCb);
+			vst1_u16(redIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
+				vminq_f32(vmaxq_f32(red, zero), one), steps))));
+			vst1_u16(greenIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
+				vminq_f32(vmaxq_f32(green, zero), one), steps))));
+			vst1_u16(blueIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
+				vminq_f32(vmaxq_f32(blue, zero), one), steps))));
+		}
+
+		// to light
+		for (int i = 0; i < vectorWidth; i++) {
+			redLight[i] = transfer[redIndex[i]];
+			greenLight[i] = transfer[greenIndex[i]];
+			blueLight[i] = transfer[blueIndex[i]];
+		}
+
+		// BT.2020 to BT.709, the tone curve, and the steps of the sRGB
+		// table
 		const float32x4_t knee = vdupq_n_f32(map.knee);
 		const float overKnee = 1 / (1 - map.knee);
-		const uint8* encode = map.encode;
-		for (; x + 4 <= width; x += 4, out += 16) {
-			float32x4_t l = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
-				vld1_u16(luma + x))), lumaOffset), matrix.lumaScale);
-			float32x4_t u = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
-				vld1_u16(cb + x))), chromaOffset), matrix.chromaScale);
-			float32x4_t v = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
-				vld1_u16(cr + x))), chromaOffset), matrix.chromaScale);
-			float32x4_t codes[3] = {
-				vfmaq_n_f32(l, v, matrix.redCr),
-				vfmaq_n_f32(vfmaq_n_f32(l, u, matrix.greenCb), v,
-					matrix.greenCr),
-				vfmaq_n_f32(l, u, matrix.blueCb)};
-			float32x4_t light[3];
-			for (int c = 0; c < 3; c++) {
-				uint32x4_t index = vcvtnq_u32_f32(vmulq_f32(vminq_f32(
-					vmaxq_f32(codes[c], zero), one), steps));
-				float32x4_t value = zero;
-				value = vld1q_lane_f32(transfer + vgetq_lane_u32(index, 0),
-					value, 0);
-				value = vld1q_lane_f32(transfer + vgetq_lane_u32(index, 1),
-					value, 1);
-				value = vld1q_lane_f32(transfer + vgetq_lane_u32(index, 2),
-					value, 2);
-				value = vld1q_lane_f32(transfer + vgetq_lane_u32(index, 3),
-					value, 3);
-				light[c] = value;
-			}
-			const float32x4_t& r = light[0];
-			const float32x4_t& g = light[1];
-			const float32x4_t& b = light[2];
+		const float aboveKnee = 1 - map.knee;
+		const float inverseExcessPeakSquared = map.inverseExcessPeakSquared;
+		for (int i = 0; i < vectorWidth; i += 4) {
+			float32x4_t r = vld1q_f32(redLight + i);
+			float32x4_t g = vld1q_f32(greenLight + i);
+			float32x4_t b = vld1q_f32(blueLight + i);
 			float32x4_t r709 = vmaxq_f32(vfmaq_n_f32(vfmaq_n_f32(
 				vmulq_n_f32(r, 1.6605f), g, -0.5876f), b, -0.0728f), zero);
 			float32x4_t g709 = vmaxq_f32(vfmaq_n_f32(vfmaq_n_f32(
@@ -518,32 +550,28 @@ map_row(const ToneMap& map, const ColorMatrix& matrix, const uint16* luma,
 				overKnee);
 			float32x4_t onePlus = vaddq_f32(one, excess);
 			float32x4_t mapped = vfmaq_f32(vmulq_f32(knee, onePlus),
-				vmulq_n_f32(excess, 1 - map.knee),
-				vfmaq_n_f32(one, excess, map.inverseExcessPeakSquared));
+				vmulq_n_f32(excess, aboveKnee),
+				vfmaq_n_f32(one, excess, inverseExcessPeakSquared));
 			float32x4_t scale = vbslq_f32(vcgtq_f32(maximum, knee),
 				vdivq_f32(mapped, vmulq_f32(maximum, onePlus)), one);
 
-			uint32x4_t red = vcvtnq_u32_f32(vminq_f32(vmulq_f32(
-				vmulq_f32(r709, scale), steps), steps));
-			uint32x4_t green = vcvtnq_u32_f32(vminq_f32(vmulq_f32(
-				vmulq_f32(g709, scale), steps), steps));
-			uint32x4_t blue = vcvtnq_u32_f32(vminq_f32(vmulq_f32(
-				vmulq_f32(b709, scale), steps), steps));
-			uint32 pixels[4] = {
-				0xff000000u | encode[vgetq_lane_u32(red, 0)] << 16
-					| encode[vgetq_lane_u32(green, 0)] << 8
-					| encode[vgetq_lane_u32(blue, 0)],
-				0xff000000u | encode[vgetq_lane_u32(red, 1)] << 16
-					| encode[vgetq_lane_u32(green, 1)] << 8
-					| encode[vgetq_lane_u32(blue, 1)],
-				0xff000000u | encode[vgetq_lane_u32(red, 2)] << 16
-					| encode[vgetq_lane_u32(green, 2)] << 8
-					| encode[vgetq_lane_u32(blue, 2)],
-				0xff000000u | encode[vgetq_lane_u32(red, 3)] << 16
-					| encode[vgetq_lane_u32(green, 3)] << 8
-					| encode[vgetq_lane_u32(blue, 3)]};
-			memcpy(out, pixels, sizeof(pixels));
+			vst1_u16(redIndex + i, vmovn_u32(vcvtnq_u32_f32(vminq_f32(
+				vmulq_f32(vmulq_f32(r709, scale), steps), steps))));
+			vst1_u16(greenIndex + i, vmovn_u32(vcvtnq_u32_f32(vminq_f32(
+				vmulq_f32(vmulq_f32(g709, scale), steps), steps))));
+			vst1_u16(blueIndex + i, vmovn_u32(vcvtnq_u32_f32(vminq_f32(
+				vmulq_f32(vmulq_f32(b709, scale), steps), steps))));
 		}
+
+		// to pixels
+		const uint8* encode = map.encode;
+		for (int i = 0; i < vectorWidth; i++, out += 4) {
+			uint32 pixel = 0xff000000u | (uint32)encode[redIndex[i]] << 16
+				| (uint32)encode[greenIndex[i]] << 8
+				| encode[blueIndex[i]];
+			memcpy(out, &pixel, sizeof(pixel));
+		}
+		x = vectorWidth;
 	}
 #endif
 	for (; x < width; x++, out += 4) {
@@ -610,18 +638,31 @@ FrameRenderer::_RenderHDR(const AVFrame* frame, uint8* bits,
 		// all in one pass over the target.
 		ColorMatrix matrix;
 		matrix.Set(frame);
+		static bool sTraceRows = getenv("AIRTIME_TRACE_HDR") != NULL;
+		std::atomic<bigtime_t> scaling(0), mapping(0);
 		fPool->Run(height, [&](int first, int last) {
 			static thread_local ScaledRows rows;
 			rows.luma.resize(width);
 			rows.cb.resize(width);
 			rows.cr.resize(width);
+			bigtime_t scaled = 0, mapped = 0;
 			for (int y = first; y < last; y++) {
+				bigtime_t start = sTraceRows ? system_time() : 0;
 				fScaler.ScaleRow(frame, y, rows.luma.data(), rows.cb.data(),
 					rows.cr.data(), rows.scratch);
+				bigtime_t middle = sTraceRows ? system_time() : 0;
 				map_row(map, matrix, rows.luma.data(), rows.cb.data(),
 					rows.cr.data(), width, bits + y * bytesPerRow);
+				if (sTraceRows) {
+					scaled += middle - start;
+					mapped += system_time() - middle;
+				}
 			}
+			scaling += scaled;
+			mapping += mapped;
 		});
+		fTraceScaling += scaling;
+		fTraceMapping += mapping;
 	} else {
 		// Anything else goes through 16 bit R'G'B' from swscale, still in
 		// its own transfer and primaries, to be mapped down afterwards.
@@ -672,10 +713,13 @@ FrameRenderer::_RenderHDR(const AVFrame* frame, uint8* bits,
 		sMap += system_time() - traceScaled;
 		if (++sCount == 48) {
 			fprintf(stderr, "airTime: HDR %s %dx%d -> %dx%d: swscale %.1f ms,"
-				" tone mapping %.1f ms\n", av_get_pix_fmt_name(
+				" tone mapping %.1f ms (processor time: scaling %.1f ms,"
+				" making pixels %.1f ms)\n", av_get_pix_fmt_name(
 					(AVPixelFormat)frame->format), frame->width, frame->height,
-				width, height, sScale / 48000.0, sMap / 48000.0);
+				width, height, sScale / 48000.0, sMap / 48000.0,
+				fTraceScaling / 48000.0, fTraceMapping / 48000.0);
 			sScale = sMap = 0;
+			fTraceScaling = fTraceMapping = 0;
 			sCount = 0;
 		}
 	}

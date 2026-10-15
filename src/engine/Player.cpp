@@ -1542,6 +1542,26 @@ Player::_DemuxLoop()
 }
 
 
+/*!	Whether libavcodec would be slower still than a hardware decoder that
+	falls behind: on the ARM boards, pictures larger than 1080p and ten-bit
+	HEVC. On the Cubie A7S a 4K Main 10 film fell from 7-20 pictures a
+	second on the Cedar engine to 1-2 in software, and a 1080p Main 10 one
+	manages 11 there. */
+static bool
+software_is_slower_still(const AVCodecParameters* parameters)
+{
+#if defined(__aarch64__)
+	return (int64)parameters->width * parameters->height > 1920 * 1088
+		|| (parameters->codec_id == AV_CODEC_ID_HEVC
+			&& (parameters->profile == FF_PROFILE_HEVC_MAIN_10
+				|| parameters->format == AV_PIX_FMT_YUV420P10LE));
+#else
+	(void)parameters;
+	return false;
+#endif
+}
+
+
 bool
 Player::_CreateVideoDecoder()
 {
@@ -1805,7 +1825,9 @@ Player::_VideoDecodeLoop()
 					bool valid;
 					bigtime_t master = _MasterClock(&valid);
 					if (valid && master - frame->pts > 250000
-						&& speedSpent > speedDuration * 5 / 4) {
+						&& speedSpent > speedDuration * 5 / 4
+						&& !software_is_slower_still(
+							fFormat->streams[fVideoStream]->codecpar)) {
 						BString why;
 						why.SetToFormat("%s cannot keep up with this film",
 							decoder->Name().String());

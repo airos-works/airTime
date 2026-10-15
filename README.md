@@ -78,16 +78,26 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
     and half a core busy in all; in software H.264 takes 2.4 cores, and
     HEVC 3.8 to 4.3, at times falling behind. A 1080p30 Main 10 film plays
     at 30 with none dropped and three cores busy; in software it manages
-    11.
+    11. A 4K HDR film (HEVC Main 10, 80 Mbit/s, over SMB) comes over at
+    half size on the board's 1080p screen, averaged by the add-on as it
+    copies the engine's picture out, and plays at 24 pictures a second with
+    none dropped for the first 40-50 seconds from a cool board (with the
+    add-on and thermal driver of air/OS's cubie-a7s from 7d5520daf1); the board
+    has no fan, and once its throttling reaches the lowest speeds (level 8)
+    pictures are dropped again. Before, the same film showed about 8 a
+    second.
 
   The Movie Inspector (⌘I) says which decoder is in use and, when it is the
   processor, why the hardware was not used.
 * **HDR10 and HLG** films are tone mapped for an ordinary display. On ARM,
   ten-bit 4:2:0 pictures are scaled to the window and tone mapped in one
   pass with NEON, on several threads; on a processor whose cores differ
-  (the RK3588's Cortex-A76 and A55) only the fast ones do it. A 4K film to
-  a 1080p screen takes about 11 ms a picture on the ROCK 5, where swscale
-  and a separate tone mapping took 33. On x86 swscale's SIMD is quicker,
+  (the RK3588's Cortex-A76 and A55) only the fast ones do it, unless there
+  are just one or two of them (the A733's two A76 beside six A55), which
+  are throttled first. A 4K film to a 1080p screen takes about 11 ms a
+  picture on the ROCK 5, where swscale and a separate tone mapping took 33.
+  A hardware decoder that can hand over pictures at half size (the
+  Cubie's) is asked to when the screens show no more than that. On x86 swscale's SIMD is quicker,
   and stays (`AIRTIME_HDR_SCALER=1` and `AIRTIME_HDR_SWSCALE=1` choose).
 * **Eight-bit pictures** are scaled to the window and made into pixels in
   one pass as well on ARM, between their two nearest rows and samples (what
@@ -109,8 +119,10 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
   pictures out: the film is back in step within a few of them
   (`AIRTIME_STRICT_DROPS=1` for the old way, `AIRTIME_TRACE_DROPS=1` to
   see what holds pictures up). A hardware decoder that remains slower than
-  the film despite buffered input is replaced by libavcodec. Playback
-  resumes at the audio clock, and the Inspector explains the switch.
+  the film despite buffered input is replaced by libavcodec, except on the
+  ARM boards for pictures larger than 1080p or ten-bit HEVC, which
+  libavcodec decodes slower still. Playback resumes at the audio clock,
+  and the Inspector explains the switch.
 * **High density screens**: on air/OS's app_server the picture is drawn
   straight into the frame buffer at the screen's own density, so a 4K film
   on a 200% desktop keeps its detail (View ▸ Draw at Screen Density, on by

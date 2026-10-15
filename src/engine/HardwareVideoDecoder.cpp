@@ -6,6 +6,7 @@
 
 #include "VideoDecoder.h"
 
+#include <algorithm>
 #include <mutex>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 #include <FindDirectory.h>
 #include <MediaFormats.h>
 #include <Path.h>
+#include <Screen.h>
 #include <image.h>
 
 #include <DecoderPlugin.h>
@@ -53,6 +55,9 @@ struct HardwareDecoderKind {
 	// software when the engine refuses a stream (for the Media Kit's
 	// users), its decoder 1 refuses, and airTime falls back itself.
 	uint			decoderIndex;
+	// Gives pictures half as wide and high (P010 and I420) when asked
+	// for exactly that, in the pass that copies them anyway.
+	bool			halfSize;
 };
 
 const HardwareDecoderKind kKinds[] = {
@@ -93,9 +98,12 @@ const HardwareDecoderKind kKinds[] = {
 	// of the air/OS tree, Radxa Cubie A7S): progressive 4:2:0 H.264 (eight
 	// bit), and HEVC Main and Main 10, up to 4096 wide; I420 and NV12, and
 	// P010 for ten bits.
+	// A 4K film on a 1080p screen comes over at half size: the 25 MB of a
+	// 4K P010 picture took 13-17 ms to make and 31-35 ms to scale and tone
+	// map into a 1471x827 window, too much at 24 a second.
 	{"sunxi_cedar", "Allwinner Cedar", {{AV_CODEC_ID_H264, 4096, 2304, 8},
 		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
-		false, 1},
+		false, 1, true},
 };
 
 // Not among Haiku's colour spaces: 4:2:0 as a plane of luma then one of Cb
@@ -223,6 +231,30 @@ is_ten_bit(const AVCodecParameters* parameters)
 	return parameters->format == AV_PIX_FMT_YUV420P10LE
 		|| (parameters->codec_id == AV_CODEC_ID_HEVC
 			&& parameters->profile == FF_PROFILE_HEVC_MAIN_10);
+}
+
+
+/*!	Whether a picture half as wide and high as the stream's shows all the
+	screen can: the screens together are no larger, in their own pixels (a
+	desktop drawn at a higher density has more of them than its frame
+	says). AIRTIME_HW_HALF=0 never asks for half pictures, =1 always. */
+static bool
+half_size_is_enough(const AVCodecParameters* parameters)
+{
+	if (const char* value = getenv("AIRTIME_HW_HALF"))
+		return strcmp(value, "0") != 0;
+	BScreen screen(B_MAIN_SCREEN_ID);
+	if (!screen.IsValid())
+		return false;
+	BRect frame = screen.Frame();
+	int64 width = frame.IntegerWidth() + 1;
+	int64 height = frame.IntegerHeight() + 1;
+	display_mode mode;
+	if (screen.GetMode(&mode) == B_OK) {
+		width = std::max(width, (int64)mode.virtual_width);
+		height = std::max(height, (int64)mode.virtual_height);
+	}
+	return width * 2 <= parameters->width && height * 2 <= parameters->height;
 }
 
 
@@ -688,6 +720,8 @@ private:
 			kColorSpaceI420, kColorSpaceNV12, B_YCbCr422, B_RGB32};
 		const char* forced = getenv("AIRTIME_HW_RGB");
 		bool tenBit = is_ten_bit(fStream->codecpar);
+		bool half = fAddOn.kind->halfSize
+			&& half_size_is_enough(fStream->codecpar);
 		for (color_space space : kSpaces) {
 			if ((space == B_YCbCr422 || space == kColorSpaceNV12
 					|| space == kColorSpaceI420)
@@ -700,6 +734,13 @@ private:
 			format.type = B_MEDIA_RAW_VIDEO;
 			format.u.raw_video = media_raw_video_format::wildcard;
 			format.u.raw_video.display.format = space;
+			if (half && (space == kColorSpaceP010
+					|| space == kColorSpaceI420)) {
+				format.u.raw_video.display.line_width
+					= fStream->codecpar->width / 2;
+				format.u.raw_video.display.line_count
+					= fStream->codecpar->height / 2;
+			}
 			status = fDecoder->NegotiateOutputFormat(&format);
 			if (status == B_OK && format.type == B_MEDIA_RAW_VIDEO
 				&& format.u.raw_video.display.format == space) {

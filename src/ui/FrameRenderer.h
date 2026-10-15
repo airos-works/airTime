@@ -60,6 +60,8 @@ private:
 			std::vector<uint8>	fEncode;		// linear -> sRGB, 4096 steps
 			int					fTransferKind;
 			float				fPeak;			// content peak, 1 = SDR white
+			bigtime_t			fTraceScaling;	// AIRTIME_TRACE_HDR: processor time
+			bigtime_t			fTraceMapping;
 			std::unique_ptr<class WorkerPool> fPool;
 };
 

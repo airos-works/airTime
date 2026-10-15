@@ -292,6 +292,7 @@ YuvScaler::Prepare(const AVFrame* frame, int width, int height)
 		return false;
 	}
 	fFormat = frame->format;
+	fLumaAsIs = width == frame->width && height == frame->height;
 	fSourceWidth = frame->width;
 	fSourceHeight = frame->height;
 	fWidth = width;
@@ -309,15 +310,35 @@ YuvScaler::ScaleRow(const AVFrame* frame, int y, uint16* luma, uint16* cb,
 	int shift = p010 ? kWeightBits : kWeightBits - 6;
 	const uint16* rows[kMaxTaps];
 
-	int first = fLumaRows.first[y];
-	for (int k = 0; k < fLumaRows.count; k++) {
-		rows[k] = (const uint16*)(frame->data[0]
-			+ (size_t)(first + k) * frame->linesize[0]);
+	if (fLumaAsIs) {
+		// A picture as large as the window (a 4K film's half size pictures
+		// full screen at 1080p): its luma is what the taps would give.
+		const uint16* row = (const uint16*)(frame->data[0]
+			+ (size_t)y * frame->linesize[0]);
+		if (p010)
+			memcpy(luma, row, fWidth * sizeof(uint16));
+		else {
+			int x = 0;
+#if defined(__aarch64__)
+			for (; x + 8 <= fWidth; x += 8)
+				vst1q_u16(luma + x, vshlq_n_u16(vld1q_u16(row + x), 6));
+#endif
+			for (; x < fWidth; x++)
+				luma[x] = (uint16)(row[x] << 6);
+		}
+	} else {
+		int first = fLumaRows.first[y];
+		for (int k = 0; k < fLumaRows.count; k++) {
+			rows[k] = (const uint16*)(frame->data[0]
+				+ (size_t)(first + k) * frame->linesize[0]);
+		}
+		scratch.luma.resize(fSourceWidth + kWindow);
+		filter_rows(rows, &fLumaRows.weights[(size_t)y * fLumaRows.count],
+			fLumaRows.count, fSourceWidth, shift, scratch.luma.data());
+		filter_columns(scratch.luma.data(), fLumaColumns, fWidth, luma);
 	}
-	scratch.luma.resize(fSourceWidth + kWindow);
-	filter_rows(rows, &fLumaRows.weights[(size_t)y * fLumaRows.count],
-		fLumaRows.count, fSourceWidth, shift, scratch.luma.data());
-	filter_columns(scratch.luma.data(), fLumaColumns, fWidth, luma);
+
+	int first;
 
 	int pairs = (fSourceWidth + 1) / 2;
 	scratch.cb.resize(pairs + kWindow);

@@ -89,7 +89,13 @@ keep_on_processors(const std::vector<int>& processors)
 	Where the cores differ, the work stays on the fast ones: on the RK3588
 	an A55 takes six times as long as an A76 over a picture, so its share
 	only ever came in last; there is a thread for each fast core, and the
-	caller waits rather than work wherever it happens to be. */
+	caller waits rather than work wherever it happens to be. Where there are
+	only one or two fast cores among more slow ones (the Allwinner A733's
+	two A76 and six A55), every core works: the fast ones are throttled
+	first there, below the slow ones (416-780 MHz against 780-1014 when a
+	4K film had heated the board), and with the A55s scaling and tone
+	mapping a 4K film's picture held 24-28 ms where the A76s alone took
+	50-60. AIRTIME_ALL_CORES uses every core anywhere. */
 class WorkerPool {
 public:
 	WorkerPool(int threads = 0)
@@ -101,9 +107,11 @@ public:
 	{
 		if (threads <= 0) {
 			fFast = fast_processors();
-			if (getenv("AIRTIME_ALL_CORES") != NULL)
-				fFast.clear();
 			unsigned cpus = std::thread::hardware_concurrency();
+			if (getenv("AIRTIME_ALL_CORES") != NULL
+				|| (fFast.size() <= 2 && cpus >= 2 * fFast.size() + 2)) {
+				fFast.clear();
+			}
 			threads = !fFast.empty() ? (int)fFast.size()
 				: cpus > 8 ? 8 : cpus > 1 ? (int)cpus : 2;
 			fCallerWorks = fFast.empty();

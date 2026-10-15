@@ -68,6 +68,7 @@ private:
 			int					fWidth = 0;
 			int					fHeight = 0;
 			int					fChromaLocation = -1;
+			bool				fLumaAsIs = false;	// the window as large
 			Taps				fLumaColumns;
 			Taps				fLumaRows;
 			Taps				fChromaColumns;
