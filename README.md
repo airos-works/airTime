@@ -81,11 +81,11 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
     11. A 4K HDR film (HEVC Main 10, 80 Mbit/s, over SMB) comes over at
     half size on the board's 1080p screen, averaged by the add-on as it
     copies the engine's picture out, and plays at 24 pictures a second with
-    none dropped for the first 40-50 seconds from a cool board (with the
-    add-on and thermal driver of air/OS's cubie-a7s from 7d5520daf1); the board
-    has no fan, and once its throttling reaches the lowest speeds (level 8)
-    pictures are dropped again. Before, the same film showed about 8 a
-    second.
+    a handful dropped for the first 90 seconds from a cool board (with the
+    add-on and thermal driver of air/OS from 7966d15352); the board has no
+    fan, and once its throttling reaches the lowest speeds (level 8) the
+    film comes off the network too slowly and plays at about 21. Before,
+    the same film showed about 8 a second.
 
   The Movie Inspector (⌘I) says which decoder is in use and, when it is the
   processor, why the hardware was not used.

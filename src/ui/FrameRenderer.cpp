@@ -500,24 +500,79 @@ map_row(const ToneMap& map, const ColorMatrix& matrix, const uint16* luma,
 		const float greenCr = matrix.greenCr;
 		const float blueCb = matrix.blueCb;
 
-		// Y'CbCr to the R'G'B' codes' steps in the transfer table
-		for (int i = 0; i < vectorWidth; i += 4) {
-			float32x4_t l = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
-				vld1_u16(luma + i))), lumaOffset), lumaScale);
-			float32x4_t u = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
-				vld1_u16(cb + i))), chromaOffset), chromaScale);
-			float32x4_t v = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
-				vld1_u16(cr + i))), chromaOffset), chromaScale);
-			float32x4_t red = vfmaq_n_f32(l, v, redCr);
-			float32x4_t green = vfmaq_n_f32(vfmaq_n_f32(l, u, greenCb), v,
-				greenCr);
-			float32x4_t blue = vfmaq_n_f32(l, u, blueCb);
-			vst1_u16(redIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
-				vminq_f32(vmaxq_f32(red, zero), one), steps))));
-			vst1_u16(greenIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
-				vminq_f32(vmaxq_f32(green, zero), one), steps))));
-			vst1_u16(blueIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
-				vminq_f32(vmaxq_f32(blue, zero), one), steps))));
+		// Y'CbCr to the R'G'B' codes' steps in the transfer table, in
+		// sixteen bit fixed point, eight samples at a time: half of each
+		// sample (fifteen bits), and each factor (steps a unit of it, at
+		// most one) as a fraction of 32768 for vqrdmulh. In floats, four
+		// at a time, this was a quarter of the pixels' cost.
+		const float half = 0.5f;
+		float lumaFactor = 2 * 4095 * matrix.lumaScale;
+		float chromaFactor = 2 * 4095 * matrix.chromaScale;
+		float factors[5] = {lumaFactor, chromaFactor * matrix.redCr,
+			chromaFactor * matrix.greenCb, chromaFactor * matrix.greenCr,
+			chromaFactor * matrix.blueCb};
+		bool fixedPoint = true;
+		int16 q[5];
+		for (int k = 0; k < 5; k++) {
+			if (fabsf(factors[k]) >= 1) {
+				fixedPoint = false;
+				break;
+			}
+			q[k] = (int16)lroundf(factors[k] * 32768);
+		}
+		if (fixedPoint) {
+			const int16x8_t lumaBase = vdupq_n_s16(
+				(int16)lroundf(matrix.lumaOffset * half));
+			const int16x8_t chromaBase = vdupq_n_s16(16384);
+			const int16x8_t lowest = vdupq_n_s16(0);
+			const int16x8_t highest = vdupq_n_s16(4095);
+			int i = 0;
+			for (; i + 8 <= vectorWidth; i += 8) {
+				int16x8_t l = vqrdmulhq_n_s16(vsubq_s16(vreinterpretq_s16_u16(
+					vshrq_n_u16(vld1q_u16(luma + i), 1)), lumaBase), q[0]);
+				int16x8_t u = vsubq_s16(vreinterpretq_s16_u16(
+					vshrq_n_u16(vld1q_u16(cb + i), 1)), chromaBase);
+				int16x8_t v = vsubq_s16(vreinterpretq_s16_u16(
+					vshrq_n_u16(vld1q_u16(cr + i), 1)), chromaBase);
+				int16x8_t red = vqaddq_s16(l, vqrdmulhq_n_s16(v, q[1]));
+				int16x8_t green = vqaddq_s16(vqaddq_s16(l,
+					vqrdmulhq_n_s16(u, q[2])), vqrdmulhq_n_s16(v, q[3]));
+				int16x8_t blue = vqaddq_s16(l, vqrdmulhq_n_s16(u, q[4]));
+				vst1q_u16(redIndex + i, vreinterpretq_u16_s16(vminq_s16(
+					vmaxq_s16(red, lowest), highest)));
+				vst1q_u16(greenIndex + i, vreinterpretq_u16_s16(vminq_s16(
+					vmaxq_s16(green, lowest), highest)));
+				vst1q_u16(blueIndex + i, vreinterpretq_u16_s16(vminq_s16(
+					vmaxq_s16(blue, lowest), highest)));
+			}
+			for (; i < vectorWidth; i++) {
+				float l = (luma[i] - matrix.lumaOffset) * matrix.lumaScale;
+				float u = (cb[i] - 32768.0f) * matrix.chromaScale;
+				float v = (cr[i] - 32768.0f) * matrix.chromaScale;
+				redIndex[i] = code_index(l + matrix.redCr * v);
+				greenIndex[i] = code_index(l + matrix.greenCb * u
+					+ matrix.greenCr * v);
+				blueIndex[i] = code_index(l + matrix.blueCb * u);
+			}
+		} else {
+			for (int i = 0; i < vectorWidth; i += 4) {
+				float32x4_t l = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
+					vld1_u16(luma + i))), lumaOffset), lumaScale);
+				float32x4_t u = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
+					vld1_u16(cb + i))), chromaOffset), chromaScale);
+				float32x4_t v = vmulq_n_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(
+					vld1_u16(cr + i))), chromaOffset), chromaScale);
+				float32x4_t red = vfmaq_n_f32(l, v, redCr);
+				float32x4_t green = vfmaq_n_f32(vfmaq_n_f32(l, u, greenCb), v,
+					greenCr);
+				float32x4_t blue = vfmaq_n_f32(l, u, blueCb);
+				vst1_u16(redIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
+					vminq_f32(vmaxq_f32(red, zero), one), steps))));
+				vst1_u16(greenIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
+					vminq_f32(vmaxq_f32(green, zero), one), steps))));
+				vst1_u16(blueIndex + i, vmovn_u32(vcvtnq_u32_f32(vmulq_f32(
+					vminq_f32(vmaxq_f32(blue, zero), one), steps))));
+			}
 		}
 
 		// to light

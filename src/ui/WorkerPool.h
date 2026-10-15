@@ -169,6 +169,13 @@ private:
 	void _Work(int index)
 	{
 		keep_on_processors(fFast);
+#ifdef __HAIKU__
+		// Below the threads that bring the film in: on the Cubie A7S, with
+		// every core throttled to 416 MHz, these at the normal priority
+		// starved the file system serving the film off the network, and
+		// pictures stopped for want of data rather than of time.
+		set_thread_priority(find_thread(NULL), B_NORMAL_PRIORITY - 2);
+#endif
 		uint64_t seen = 0;
 		for (;;) {
 			{
