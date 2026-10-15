@@ -80,6 +80,11 @@ public:
 								Player(const BMessenger& target);
 								~Player();
 
+			// Where notifications go; for a target that is not in a looper
+			// yet when the player is made (a view, before its window).
+			void				SetTarget(const BMessenger& target)
+									{ fTarget = target; }
+
 			status_t			Open(const char* path, BString* error);
 			void				Close();
 			bool				IsOpen() const { return fFormat != NULL; }

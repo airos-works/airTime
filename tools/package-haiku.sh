@@ -20,6 +20,12 @@ cp build-haiku/airTime "$STAGE/apps/airTime"
 strip --strip-debug "$STAGE/apps/airTime"
 # GNU strip drops the appended Haiku resources; put them back.
 xres -o "$STAGE/apps/airTime" build-haiku/airTime.rsrc
+# The Quick Look add-on, where the SDK had Quick Look.
+if [ -f build-haiku/airTime_quicklook ]; then
+	mkdir -p "$STAGE/add-ons/quick_look"
+	cp build-haiku/airTime_quicklook "$STAGE/add-ons/quick_look/airTime"
+	strip --strip-debug "$STAGE/add-ons/quick_look/airTime"
+fi
 cp resources/airTime.PackageInfo "$STAGE/.PackageInfo"
 cp resources/scripts/airtime-register-default.sh "$STAGE/boot/post-install/"
 chmod 755 "$STAGE/boot/post-install/airtime-register-default.sh"

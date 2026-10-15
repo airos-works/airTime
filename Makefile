@@ -33,9 +33,37 @@ UI_SRC = $(wildcard src/ui/*.cpp) $(wildcard src/*.cpp)
 APP_OBJ = $(ENGINE_SRC:%.cpp=$(BUILD)/%.o) $(UI_SRC:%.cpp=$(BUILD)/%.o)
 APP_LIBS = -lbe -lgame -lmedia -ltracker -ltranslation -llocalestub $(FFMPEG_LIBS)
 
-.PHONY: all engine package clean check check-host icon
+# The Quick Look add-on (src/quicklook): the engine and the video view built
+# again as position independent code, for the quick_look_server to load.
+# It needs air/OS's Quick Look headers and libquicklook; where the SDK is
+# an older Haiku without them the add-on is left out. QUICKLOOK=1 forces
+# it, with QUICKLOOK_CPPFLAGS and QUICKLOOK_LDFLAGS pointing at them.
+QUICKLOOK_CPPFLAGS ?=
+QUICKLOOK_LDFLAGS ?=
+QUICKLOOK ?= $(if $(wildcard $(HAIKU_HEADERS)/os/add-ons/quick_look/QuickLook.h),1,)
+QUICKLOOK_UI_SRC = $(filter-out src/ui/PlayerWindow.cpp src/ui/GoToTimeWindow.cpp \
+	src/ui/InspectorWindow.cpp src/ui/DirectRescue.cpp,$(wildcard src/ui/*.cpp))
+QUICKLOOK_SRC = $(ENGINE_SRC) $(QUICKLOOK_UI_SRC) src/Settings.cpp \
+	src/quicklook/QuickLookAddOn.cpp
+QUICKLOOK_OBJ = $(QUICKLOOK_SRC:%.cpp=$(BUILD)/quicklook/%.o)
+QUICKLOOK_TARGET = $(if $(QUICKLOOK),$(BUILD)/airTime_quicklook,)
 
-all: $(BUILD)/airTime
+.PHONY: all engine package clean check check-host icon quicklook
+
+all: $(BUILD)/airTime $(QUICKLOOK_TARGET)
+
+quicklook: $(BUILD)/airTime_quicklook
+
+$(BUILD)/airTime_quicklook: $(QUICKLOOK_OBJ)
+	$(CXX) -shared -Wl,-soname=airTime -pthread -o $@.new $(QUICKLOOK_OBJ) \
+		$(FFMPEG_LDFLAGS) $(QUICKLOOK_LDFLAGS) -lquicklook $(APP_LIBS) $(APP_LDEND)
+	mv $@.new $@
+
+$(BUILD)/quicklook/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(QUICKLOOK_CPPFLAGS) $(CXXFLAGS) -fPIC -MMD -MP -c $< -o $@
+
+-include $(QUICKLOOK_OBJ:.o=.d)
 
 engine: $(ENGINE_SRC:%.cpp=$(BUILD)/%.o)
 

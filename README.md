@@ -142,6 +142,13 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
   with a floating controller that hides when the mouse rests.
 * Opens what Tracker opens: once installed, double-clicking a film or a song
   plays it in airTime.
+* **Quick Look**: on air/OS, the space bar in Tracker plays a film (or a
+  song, when Amp is not installed) in the Quick Look panel with this same
+  engine, hardware decoding included. The add-on (`src/quicklook/`, built
+  from the engine's sources as `add-ons/quick_look/airTime`) ships in the
+  package; a double click on the picture, or the full screen button, opens
+  the film in airTime itself. It is built when the SDK has
+  `add-ons/quick_look/QuickLook.h` (`make QUICKLOOK=1` forces it).
 
 ## Keys
 
@@ -164,6 +171,7 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
 ```
 src/engine/   playback: demuxing, decoding, clocks, subtitles, captions
 src/ui/       the window, the metal controller, the video view
+src/quicklook/ the Quick Look add-on: the engine and the video view in Tracker's panel
 src/          the application and its settings
 tests/        host-side tests of the engine (make check-host)
 tools/        building, packaging, the icon, test material
