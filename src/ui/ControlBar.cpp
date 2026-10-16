@@ -19,7 +19,7 @@
 namespace airtime {
 
 
-static const float kMetalHeight = 62;
+static const float kBarHeight = 62;
 static const float kHudHeight = 74;
 
 
@@ -53,7 +53,7 @@ ControlBar::ControlBar(BRect frame, bool hud, const BMessenger& target)
 	fLastDragSent(0)
 {
 	SetViewColor(B_TRANSPARENT_COLOR);
-	SetLowColor(metal::color(200, 200, 200));
+	SetLowColor(look::kSurface);
 	_Layout();
 }
 
@@ -61,7 +61,7 @@ ControlBar::ControlBar(BRect frame, bool hud, const BMessenger& target)
 /*static*/ float
 ControlBar::PreferredHeight(bool hud)
 {
-	return hud ? kHudHeight : kMetalHeight;
+	return hud ? kHudHeight : kBarHeight;
 }
 
 
@@ -376,15 +376,9 @@ ControlBar::Draw(BRect updateRect)
 	if (fHud) {
 		SetHighColor(0, 0, 0);
 		FillRect(updateRect);
-		metal::hud_panel(this, bounds.InsetByCopy(1, 1));
+		look::hud_panel(this, bounds.InsetByCopy(1, 1));
 	} else {
-		metal::fill(this, updateRect, Frame().LeftTop());
-		BRect surface = bounds;
-		if (Parent() != NULL) {
-			surface = Parent()->Bounds();
-			surface.OffsetBy(-Frame().left, -Frame().top);
-		}
-		metal::sheen(this, updateRect, surface);
+		look::toolbar(this, updateRect, bounds);
 	}
 
 	if (updateRect.Intersects(fTimelineHit))
@@ -417,13 +411,13 @@ ControlBar::_DrawButton(part which, glyph_kind glyph, bool prominent)
 	button_state state = _StateOf(which);
 
 	if (fHud) {
-		rgb_color color = metal::color(232, 232, 236);
+		rgb_color color = look::color(232, 232, 236);
 		if (state == BUTTON_HOVER)
-			color = metal::color(255, 255, 255);
+			color = look::color(255, 255, 255);
 		else if (state == BUTTON_PRESSED)
-			color = metal::color(150, 170, 200);
+			color = look::color(150, 170, 200);
 		else if (state == BUTTON_DISABLED)
-			color = metal::color(120, 120, 120);
+			color = look::color(120, 120, 120);
 		if (state == BUTTON_HOVER || state == BUTTON_PRESSED) {
 			PushState();
 			SetDrawingMode(B_OP_ALPHA);
@@ -434,7 +428,7 @@ ControlBar::_DrawButton(part which, glyph_kind glyph, bool prominent)
 		}
 		BRect glyphRect = frame.InsetByCopy(frame.Width() * 0.12f,
 			frame.Height() * 0.12f);
-		metal::glyph(this, glyph, glyphRect, color);
+		look::glyph(this, glyph, glyphRect, color);
 		return;
 	}
 
@@ -444,30 +438,30 @@ ControlBar::_DrawButton(part which, glyph_kind glyph, bool prominent)
 		SetDrawingMode(B_OP_ALPHA);
 		SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
 		if (state == BUTTON_HOVER || state == BUTTON_PRESSED) {
-			SetHighColor(state == BUTTON_PRESSED ? metal::color(0, 0, 0, 40)
-				: metal::color(255, 255, 255, 90));
+			SetHighColor(state == BUTTON_PRESSED ? look::color(0, 0, 0, 40)
+				: look::color(255, 255, 255, 90));
 			FillRoundRect(frame, 3, 3);
 		}
 		PopState();
-		metal::glyph(this, glyph, frame.InsetByCopy(3, 3),
-			state == BUTTON_DISABLED ? metal::color(140, 140, 140)
-				: metal::color(48, 48, 52));
+		look::glyph(this, glyph, frame.InsetByCopy(3, 3),
+			state == BUTTON_DISABLED ? look::color(140, 140, 140)
+				: look::color(48, 48, 52));
 		return;
 	}
 
-	metal::round_button(this, frame, state, prominent);
+	look::round_button(this, frame, state, prominent);
 	float inset = frame.Width() * (prominent ? 0.22f : 0.24f);
 	BRect glyphRect = frame.InsetByCopy(inset, inset);
 	if (glyph == GLYPH_PLAY)
 		glyphRect.OffsetBy(frame.Width() * 0.03f, 0);
-	rgb_color color = state == BUTTON_DISABLED ? metal::color(150, 150, 150)
-		: metal::color(44, 44, 48);
+	rgb_color color = state == BUTTON_DISABLED ? look::color(150, 150, 150)
+		: look::color(44, 44, 48);
 	// An engraved look: a light edge under the dark glyph.
 	if (state != BUTTON_DISABLED) {
-		metal::glyph(this, glyph, glyphRect.OffsetByCopy(0, 1),
-			metal::color(255, 255, 255, 160));
+		look::glyph(this, glyph, glyphRect.OffsetByCopy(0, 1),
+			look::color(255, 255, 255, 160));
 	}
-	metal::glyph(this, glyph, glyphRect, color);
+	look::glyph(this, glyph, glyphRect, color);
 }
 
 
@@ -476,15 +470,15 @@ ControlBar::_DrawTimeline()
 {
 	bigtime_t shown = fPressed == PART_TIMELINE ? fDragTime : fPosition;
 	float x = _TimelineX(shown);
-	metal::timeline_track(this, fTrack, fHasMedia ? x : fTrack.left, fHud);
+	look::timeline_track(this, fTrack, fHasMedia ? x : fTrack.left, fHud);
 
 	// Chapter marks.
 	if (fDuration > 0 && !fChapters.empty()) {
 		PushState();
 		SetDrawingMode(B_OP_ALPHA);
 		SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-		SetHighColor(fHud ? metal::color(255, 255, 255, 110)
-			: metal::color(30, 30, 34, 120));
+		SetHighColor(fHud ? look::color(255, 255, 255, 110)
+			: look::color(30, 30, 34, 120));
 		for (bigtime_t start : fChapters) {
 			if (start <= 0)
 				continue;
@@ -498,7 +492,7 @@ ControlBar::_DrawTimeline()
 	if (fHasMedia && fDuration > 0) {
 		button_state state = fPressed == PART_TIMELINE ? BUTTON_PRESSED
 			: fHover == PART_TIMELINE ? BUTTON_HOVER : BUTTON_NORMAL;
-		metal::playhead(this, BPoint(roundf(x) + 0.5f, fTrack.bottom - 1),
+		look::playhead(this, BPoint(roundf(x) + 0.5f, fTrack.bottom - 1),
 			fHud ? 12 : 13, state, fHud);
 	}
 }
@@ -508,21 +502,21 @@ void
 ControlBar::_DrawVolume()
 {
 	button_state state = _StateOf(PART_SPEAKER);
-	rgb_color color = fHud ? metal::color(232, 232, 236)
-		: metal::color(48, 48, 52);
+	rgb_color color = fHud ? look::color(232, 232, 236)
+		: look::color(48, 48, 52);
 	if (!fHasAudio)
-		color = fHud ? metal::color(110, 110, 110) : metal::color(140, 140, 140);
+		color = fHud ? look::color(110, 110, 110) : look::color(140, 140, 140);
 	else if (state == BUTTON_PRESSED)
-		color = metal::mix(color, metal::color(128, 128, 128), 0.5f);
-	metal::glyph(this, fMuted ? GLYPH_SPEAKER_MUTED : GLYPH_SPEAKER, fSpeaker,
+		color = look::mix(color, look::color(128, 128, 128), 0.5f);
+	look::glyph(this, fMuted ? GLYPH_SPEAKER_MUTED : GLYPH_SPEAKER, fSpeaker,
 		color);
 
 	if (fVolumeTrack.left < -50)
 		return;
 	float fraction = fMuted ? 0 : fVolume;
-	metal::slider_track(this, fVolumeTrack, fraction, fHud);
+	look::slider_track(this, fVolumeTrack, fraction, fHud);
 	float knobX = fVolumeTrack.left + fVolumeTrack.Width() * fraction;
-	metal::slider_knob(this, BPoint(roundf(knobX), (fVolumeTrack.top
+	look::slider_knob(this, BPoint(roundf(knobX), (fVolumeTrack.top
 		+ fVolumeTrack.bottom) / 2), fPressed == PART_VOLUME
 			? BUTTON_PRESSED : BUTTON_NORMAL, fHud);
 }
@@ -532,7 +526,7 @@ void
 ControlBar::_DrawLCD()
 {
 	if (!fHud)
-		metal::lcd(this, fLCD);
+		look::lcd(this, fLCD);
 
 	BFont font(be_bold_font);
 	font.SetSize(fHud ? 13 : 12);
@@ -542,10 +536,10 @@ ControlBar::_DrawLCD()
 	float baseline = roundf((fLCD.top + fLCD.bottom) / 2
 		+ (height.ascent - height.descent) / 2);
 
-	rgb_color text = fHud ? metal::color(240, 240, 244)
-		: metal::lcd_text_color();
-	rgb_color dim = fHud ? metal::color(170, 170, 176)
-		: metal::lcd_dim_text_color();
+	rgb_color text = fHud ? look::color(240, 240, 244)
+		: look::lcd_text_color();
+	rgb_color dim = fHud ? look::color(170, 170, 176)
+		: look::lcd_dim_text_color();
 
 	PushState();
 	SetDrawingMode(B_OP_OVER);
@@ -642,7 +636,7 @@ ControlBar::MouseDown(BPoint where)
 	if (which == PART_NONE) {
 		if (fHud)
 			return;
-		// Brushed metal can be dragged, as QuickTime's could.
+		// The bar itself drags the window, as QuickTime's did.
 		BMessage* current = Window()->CurrentMessage();
 		int32 clicks = 1;
 		if (current != NULL)

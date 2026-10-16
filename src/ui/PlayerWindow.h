@@ -23,7 +23,7 @@ class BMessageRunner;
 namespace airtime {
 
 class ControlBar;
-class MetalView;
+class FrameView;
 class VideoView;
 
 
@@ -109,7 +109,7 @@ private:
 			BMenu*				fSubtitleSizeMenu;
 			BMenuItem*			fPlayItem;
 
-			MetalView*			fMetal;
+			FrameView*			fFrame;
 			VideoView*			fVideo;
 			ControlBar*			fControls;
 			ControlBar*			fHud;

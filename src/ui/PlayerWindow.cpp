@@ -33,7 +33,7 @@
 #include "InspectorWindow.h"
 #include "Languages.h"
 #include "Messages.h"
-#include "Metal.h"
+#include "Look.h"
 #include "Screens.h"
 #include "Settings.h"
 #include "VideoView.h"
@@ -73,12 +73,12 @@ static const int kSpeedCount = sizeof(kSpeeds) / sizeof(kSpeeds[0]);
 static const double kMaxScanRate = 64.0;
 
 
-/*!	The window's brushed metal, with a groove around the picture. */
-class MetalView : public BView {
+/*!	The window's grey surface, with a groove around the picture. */
+class FrameView : public BView {
 public:
-	MetalView(BRect frame)
+	FrameView(BRect frame)
 		:
-		BView(frame, "metal", B_FOLLOW_ALL, B_WILL_DRAW | B_FRAME_EVENTS
+		BView(frame, "frame", B_FOLLOW_ALL, B_WILL_DRAW | B_FRAME_EVENTS
 			| B_FULL_UPDATE_ON_RESIZE),
 		fGroove(0, 0, -1, -1)
 	{
@@ -93,10 +93,9 @@ public:
 
 	virtual void Draw(BRect updateRect)
 	{
-		metal::fill(this, updateRect);
-		metal::sheen(this, updateRect, Bounds());
+		look::surface(this, updateRect);
 		if (fGroove.IsValid())
-			metal::inset_frame(this, fGroove);
+			look::inset_frame(this, fGroove);
 	}
 
 private:
@@ -202,18 +201,18 @@ PlayerWindow::PlayerWindow(BRect frame)
 
 	BRect bounds = Bounds();
 	bounds.top = _MenuHeight();
-	fMetal = new MetalView(bounds);
-	AddChild(fMetal);
+	fFrame = new FrameView(bounds);
+	AddChild(fFrame);
 
-	BRect metalBounds = fMetal->Bounds();
+	BRect frameBounds = fFrame->Bounds();
 	float controlsHeight = ControlBar::PreferredHeight(false);
 	fVideo = new VideoView(BRect(kBorder, kBorder,
-		metalBounds.right - kBorder, metalBounds.bottom - controlsHeight),
+		frameBounds.right - kBorder, frameBounds.bottom - controlsHeight),
 		BMessenger(this));
-	fMetal->AddChild(fVideo);
-	fControls = new ControlBar(BRect(0, metalBounds.bottom - controlsHeight
-		+ 1, metalBounds.right, metalBounds.bottom), false, BMessenger(this));
-	fMetal->AddChild(fControls);
+	fFrame->AddChild(fVideo);
+	fControls = new ControlBar(BRect(0, frameBounds.bottom - controlsHeight
+		+ 1, frameBounds.right, frameBounds.bottom), false, BMessenger(this));
+	fFrame->AddChild(fControls);
 
 	fHud = new ControlBar(BRect(0, 0, 640, ControlBar::PreferredHeight(true)),
 		true, BMessenger(this));
@@ -770,14 +769,14 @@ PlayerWindow::_Layout()
 {
 	BRect bounds = Bounds();
 	float menuHeight = _MenuHeight();
-	fMetal->MoveTo(0, menuHeight);
-	fMetal->ResizeTo(bounds.Width(), bounds.Height() - menuHeight);
-	BRect metal = fMetal->Bounds();
+	fFrame->MoveTo(0, menuHeight);
+	fFrame->ResizeTo(bounds.Width(), bounds.Height() - menuHeight);
+	BRect surface = fFrame->Bounds();
 
 	if (fFullScreen) {
 		fVideo->MoveTo(0, 0);
-		fVideo->ResizeTo(metal.Width(), metal.Height());
-		fMetal->SetGroove(BRect(0, 0, -1, -1));
+		fVideo->ResizeTo(surface.Width(), surface.Height());
+		fFrame->SetGroove(BRect(0, 0, -1, -1));
 		BRect video = fVideo->Bounds();
 		float hudWidth = std::min(720.0f, std::max(480.0f,
 			video.Width() * 0.55f));
@@ -790,18 +789,18 @@ PlayerWindow::_Layout()
 	}
 
 	float controlsHeight = _ControlsHeight();
-	fControls->MoveTo(0, metal.bottom - controlsHeight + 1);
-	fControls->ResizeTo(metal.Width(), controlsHeight - 1);
+	fControls->MoveTo(0, surface.bottom - controlsHeight + 1);
+	fControls->ResizeTo(surface.Width(), controlsHeight - 1);
 
 	bool audioOnly = fHasFile && !fPlayer->HasVideo();
 	BRect video;
 	if (audioOnly) {
-		video.Set(0, 0, metal.right, metal.bottom - controlsHeight);
-		fMetal->SetGroove(BRect(0, 0, -1, -1));
+		video.Set(0, 0, surface.right, surface.bottom - controlsHeight);
+		fFrame->SetGroove(BRect(0, 0, -1, -1));
 	} else {
-		video.Set(kBorder, kBorder, metal.right - kBorder,
-			metal.bottom - controlsHeight);
-		fMetal->SetGroove(video);
+		video.Set(kBorder, kBorder, surface.right - kBorder,
+			surface.bottom - controlsHeight);
+		fFrame->SetGroove(video);
 	}
 	fVideo->MoveTo(video.LeftTop());
 	fVideo->ResizeTo(video.Width(), video.Height());
@@ -1125,7 +1124,7 @@ PlayerWindow::_Pulse()
 	if (fResizePending && now - fResizedAt > 300000) {
 		BPoint where;
 		uint32 buttons;
-		fMetal->GetMouse(&where, &buttons, false);
+		fFrame->GetMouse(&where, &buttons, false);
 		if (buttons == 0) {
 			fResizePending = false;
 			_SnapToAspect();

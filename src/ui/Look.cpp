@@ -4,23 +4,19 @@
  */
 
 
-#include "Metal.h"
+#include "Look.h"
 
 #include <math.h>
-#include <mutex>
-#include <vector>
 
-#include <Bitmap.h>
 #include <Gradient.h>
 #include <GradientLinear.h>
-#include <GradientRadial.h>
 #include <Region.h>
 #include <Shape.h>
 #include <View.h>
 
 
 namespace airtime {
-namespace metal {
+namespace look {
 
 
 rgb_color
@@ -47,115 +43,37 @@ mix(rgb_color a, rgb_color b, float amount)
 }
 
 
-// #pragma mark - texture
-
-
-static std::once_flag sTextureOnce;
-static BBitmap* sTexture = NULL;
-
-
-static void
-make_texture()
-{
-	const int width = 512;
-	const int height = 256;
-	sTexture = new BBitmap(BRect(0, 0, width - 1, height - 1), B_RGB32);
-
-	uint32 seed = 0x2468ace1;
-	auto random = [&seed]() {
-		seed = seed * 1664525u + 1013904223u;
-		return ((seed >> 8) & 0xffff) / 65535.0f * 2.0f - 1.0f;
-	};
-
-	std::vector<float> noise(width);
-	std::vector<float> streak(width);
-	float rowDrift = 0;
-	uint8* bits = (uint8*)sTexture->Bits();
-	int32 bytesPerRow = sTexture->BytesPerRow();
-
-	for (int y = 0; y < height; y++) {
-		// Brushing leaves long horizontal streaks, different on every row,
-		// and a slow drift in brightness from row to row.
-		for (int x = 0; x < width; x++)
-			noise[x] = random();
-		for (int pass = 0; pass < 2; pass++) {
-			const int length = pass == 0 ? 41 : 23;
-			float sum = 0;
-			for (int i = -length / 2; i <= length / 2; i++)
-				sum += noise[(i + width) % width];
-			for (int x = 0; x < width; x++) {
-				streak[x] = sum / length;
-				sum += noise[(x + length / 2 + 1) % width];
-				sum -= noise[(x - length / 2 + width) % width];
-			}
-			noise = streak;
-		}
-		rowDrift = rowDrift * 0.82f + random() * 1.4f;
-		float rowBase = 204.0f + rowDrift + random() * 2.2f;
-
-		uint8* row = bits + y * bytesPerRow;
-		for (int x = 0; x < width; x++) {
-			float value = rowBase + streak[x] * 38.0f + random() * 1.6f;
-			if (value < 0)
-				value = 0;
-			if (value > 255)
-				value = 255;
-			uint8 gray = (uint8)value;
-			row[x * 4 + 0] = gray < 253 ? gray + 2 : 255;	// a cool tint
-			row[x * 4 + 1] = gray;
-			row[x * 4 + 2] = gray > 1 ? gray - 1 : 0;
-			row[x * 4 + 3] = 255;
-		}
-	}
-}
-
-
-const BBitmap*
-texture()
-{
-	std::call_once(sTextureOnce, make_texture);
-	return sTexture;
-}
+// #pragma mark - surfaces
 
 
 void
-fill(BView* view, BRect rect, BPoint origin)
+surface(BView* view, BRect rect)
 {
-	const BBitmap* tile = texture();
-	BRect bounds = tile->Bounds();
-	float tileWidth = bounds.Width() + 1;
-	float tileHeight = bounds.Height() + 1;
-
-	// Tiles lined up with the surface: start left of and above the rect.
-	float startX = floorf((rect.left + origin.x) / tileWidth) * tileWidth
-		- origin.x;
-	float startY = floorf((rect.top + origin.y) / tileHeight) * tileHeight
-		- origin.y;
 	view->PushState();
 	view->SetDrawingMode(B_OP_COPY);
-	BRegion clip(rect);
-	view->ConstrainClippingRegion(&clip);
-	for (float y = startY; y <= rect.bottom; y += tileHeight) {
-		for (float x = startX; x <= rect.right; x += tileWidth) {
-			view->DrawBitmap(tile, BPoint(x, y));
-		}
-	}
+	view->SetHighColor(kSurface);
+	view->FillRect(rect);
 	view->PopState();
 }
 
 
 void
-sheen(BView* view, BRect rect, BRect surface)
+toolbar(BView* view, BRect rect, BRect bar)
 {
 	view->PushState();
+	view->SetDrawingMode(B_OP_COPY);
+	BRegion clip(rect);
+	view->ConstrainClippingRegion(&clip);
+	BGradientLinear gradient(BPoint(bar.left, bar.top),
+		BPoint(bar.left, bar.bottom));
+	gradient.AddColor(kSurface, 0);
+	gradient.AddColor(kSurfaceBottom, 255);
+	view->FillRect(bar, gradient);
+	// A light line along the top, as Amp's toolbar has.
 	view->SetDrawingMode(B_OP_ALPHA);
 	view->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-	BGradientLinear gradient(BPoint(0, surface.top), BPoint(0, surface.bottom));
-	gradient.AddColor(color(255, 255, 255, 70), 0);
-	gradient.AddColor(color(255, 255, 255, 0), 110);
-	gradient.AddColor(color(0, 0, 0, 0), 150);
-	gradient.AddColor(color(0, 0, 0, 34), 255);
-	view->FillRect(rect, gradient);
+	view->SetHighColor(color(255, 255, 255, 140));
+	view->StrokeLine(bar.LeftTop(), bar.RightTop());
 	view->PopState();
 }
 
@@ -192,60 +110,46 @@ inset_frame(BView* view, BRect rect, float radius)
 void
 round_button(BView* view, BRect rect, button_state state, bool prominent)
 {
+	// Amp's round button: a soft shadow, a face lit from above and a thin
+	// grey rim; pressed, it darkens.
 	view->PushState();
 	view->SetDrawingMode(B_OP_ALPHA);
 	view->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
+	if (state != BUTTON_DISABLED) {
+		view->SetHighColor(color(0, 0, 0, 40));
+		view->FillEllipse(rect.OffsetByCopy(0, 1.5f));
+	}
 
-	// The hole the button sits in.
-	BRect well = rect.InsetByCopy(-1, -1);
-	BGradientLinear wellGradient(well.LeftTop(), well.LeftBottom());
-	wellGradient.AddColor(color(0, 0, 0, 90), 0);
-	wellGradient.AddColor(color(255, 255, 255, 160), 255);
-	view->FillEllipse(well, wellGradient);
-
-	// The rim.
-	BGradientLinear rim(rect.LeftTop(), rect.LeftBottom());
-	rim.AddColor(color(96, 96, 98), 0);
-	rim.AddColor(color(58, 58, 60), 255);
-	view->FillEllipse(rect, rim);
-
-	// The face, lit from above; pressed, it turns its shade upward.
-	BRect face = rect.InsetByCopy(prominent ? 1.6f : 1.2f,
-		prominent ? 1.6f : 1.2f);
-	BGradientLinear faceGradient(face.LeftTop(), face.LeftBottom());
+	rgb_color top;
+	rgb_color bottom;
+	rgb_color rim = color(118, 118, 118);
 	switch (state) {
 		case BUTTON_PRESSED:
-			faceGradient.AddColor(color(150, 150, 154), 0);
-			faceGradient.AddColor(color(196, 196, 200), 160);
-			faceGradient.AddColor(color(222, 222, 226), 255);
+			top = color(190, 190, 190);
+			bottom = color(150, 150, 150);
 			break;
 		case BUTTON_HOVER:
-			faceGradient.AddColor(color(255, 255, 255), 0);
-			faceGradient.AddColor(color(232, 232, 236), 120);
-			faceGradient.AddColor(color(196, 196, 202), 255);
+			top = color(255, 255, 255);
+			bottom = color(210, 210, 210);
 			break;
 		case BUTTON_DISABLED:
-			faceGradient.AddColor(color(226, 226, 226), 0);
-			faceGradient.AddColor(color(200, 200, 200), 255);
+			top = color(240, 240, 240);
+			bottom = color(216, 216, 216);
+			rim = color(164, 164, 164);
 			break;
 		default:
-			faceGradient.AddColor(color(250, 250, 252), 0);
-			faceGradient.AddColor(color(222, 222, 226), 120);
-			faceGradient.AddColor(color(178, 178, 184), 255);
+			top = color(252, 252, 252);
+			bottom = color(196, 196, 196);
 			break;
 	}
-	view->FillEllipse(face, faceGradient);
-
-	// A soft reflection in the upper half.
-	if (state != BUTTON_PRESSED) {
-		BRect gloss = face.InsetByCopy(face.Width() * 0.18f, 0);
-		gloss.top += face.Height() * 0.06f;
-		gloss.bottom = gloss.top + face.Height() * 0.42f;
-		BGradientLinear glossGradient(gloss.LeftTop(), gloss.LeftBottom());
-		glossGradient.AddColor(color(255, 255, 255, 170), 0);
-		glossGradient.AddColor(color(255, 255, 255, 0), 255);
-		view->FillEllipse(gloss, glossGradient);
-	}
+	view->SetDrawingMode(B_OP_COPY);
+	BGradientLinear face(rect.LeftTop(), rect.LeftBottom());
+	face.AddColor(top, 0);
+	face.AddColor(bottom, 255);
+	view->FillEllipse(rect, face);
+	view->SetHighColor(rim);
+	view->SetPenSize(1);
+	view->StrokeEllipse(rect);
 	view->PopState();
 }
 
@@ -459,8 +363,7 @@ timeline_track(BView* view, BRect track, float playedTo, bool dark)
 void
 playhead(BView* view, BPoint tip, float height, button_state state, bool dark)
 {
-	// QuickTime's playhead: a little metal pentagon pointing down at the
-	// track.
+	// The playhead: a little grey pentagon pointing down at the track.
 	float width = roundf(height * 0.8f);
 	float shoulder = height * 0.52f;
 	auto outline = [&](BShape& shape, float dx, float dy) {
@@ -484,21 +387,18 @@ playhead(BView* view, BPoint tip, float height, button_state state, bool dark)
 	view->SetHighColor(color(0, 0, 0, 60));
 	view->FillShape(&shadow);
 
-	BGradientLinear face(BPoint(tip.x - width / 2, 0),
-		BPoint(tip.x + width / 2, 0));
+	BGradientLinear face(BPoint(0, tip.y - height), BPoint(0, tip.y));
 	bool pressed = state == BUTTON_PRESSED;
 	if (dark) {
 		face.AddColor(color(250, 250, 250), 0);
 		face.AddColor(color(200, 200, 204), 255);
 	} else {
-		face.AddColor(pressed ? color(170, 170, 176) : color(252, 252, 252), 0);
-		face.AddColor(pressed ? color(140, 140, 146) : color(206, 206, 212),
-			140);
-		face.AddColor(pressed ? color(120, 120, 126) : color(164, 164, 170),
+		face.AddColor(pressed ? color(190, 190, 190) : color(252, 252, 252), 0);
+		face.AddColor(pressed ? color(150, 150, 150) : color(196, 196, 196),
 			255);
 	}
 	view->FillShape(&shape, face);
-	view->SetHighColor(color(40, 40, 44, 220));
+	view->SetHighColor(dark ? color(40, 40, 44, 220) : color(118, 118, 118));
 	view->SetPenSize(1);
 	view->StrokeShape(&shape);
 	view->PopState();
@@ -537,49 +437,41 @@ slider_knob(BView* view, BPoint center, button_state state, bool dark)
 rgb_color
 lcd_text_color()
 {
-	return color(36, 42, 28);
+	return color(40, 45, 38);
 }
 
 
 rgb_color
 lcd_dim_text_color()
 {
-	return color(88, 98, 76);
+	return color(90, 98, 86);
 }
 
 
 void
 lcd(BView* view, BRect rect)
 {
+	// Amp's LCD: a pale green glass with a soft shadow under it.
 	view->PushState();
 	view->SetDrawingMode(B_OP_ALPHA);
 	view->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-	float radius = 5;
+	float radius = 6;
+	view->SetHighColor(color(0, 0, 0, 40));
+	view->FillRoundRect(rect.OffsetByCopy(0, 1), radius, radius);
 
-	// The bezel: cut into the metal.
-	BRect bezel = rect.InsetByCopy(-1, -1);
-	BGradientLinear bezelGradient(bezel.LeftTop(), bezel.LeftBottom());
-	bezelGradient.AddColor(color(70, 72, 66, 230), 0);
-	bezelGradient.AddColor(color(255, 255, 255, 210), 255);
-	view->FillRoundRect(bezel, radius + 1, radius + 1, bezelGradient);
-
-	// The glass, khaki and slightly lit from below like the old LCD.
+	view->SetDrawingMode(B_OP_COPY);
 	BGradientLinear glass(rect.LeftTop(), rect.LeftBottom());
-	glass.AddColor(color(176, 186, 156), 0);
-	glass.AddColor(color(200, 208, 182), 90);
-	glass.AddColor(color(214, 220, 198), 255);
+	glass.AddColor(color(232, 237, 226), 0);
+	glass.AddColor(color(200, 210, 190), 255);
 	view->FillRoundRect(rect, radius, radius, glass);
-
-	// Its inner shadow.
-	BRect shade = rect.InsetByCopy(1, 1);
-	shade.bottom = shade.top + 4;
-	BGradientLinear shadeGradient(shade.LeftTop(), shade.LeftBottom());
-	shadeGradient.AddColor(color(0, 0, 0, 60), 0);
-	shadeGradient.AddColor(color(0, 0, 0, 0), 255);
-	view->FillRoundRect(shade, radius - 1, radius - 1, shadeGradient);
-
-	view->SetHighColor(color(60, 64, 52, 200));
+	view->SetHighColor(color(143, 151, 138));
+	view->SetPenSize(1);
 	view->StrokeRoundRect(rect, radius, radius);
+
+	view->SetDrawingMode(B_OP_ALPHA);
+	view->SetHighColor(color(255, 255, 255, 120));
+	view->StrokeLine(BPoint(rect.left + radius, rect.top + 1),
+		BPoint(rect.right - radius, rect.top + 1));
 	view->PopState();
 }
 
@@ -603,5 +495,5 @@ hud_panel(BView* view, BRect rect)
 	view->PopState();
 }
 
-}	// namespace metal
+}	// namespace look
 }	// namespace airtime

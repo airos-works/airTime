@@ -20,7 +20,24 @@
 #include <Window.h>
 
 #include "Messages.h"
-#include "Metal.h"
+#include "Look.h"
+
+
+// What an app_server that keeps direct windows connected at a higher
+// density adds to direct_buffer_info: the density in percent and its own
+// copy of the screen. Headers from before the fields have them as the first
+// three words of the reserved space; later ones name them, and the reserved
+// space begins after them, so the names have to be used where they exist.
+// B_DIRECT_DEVICE_PIXELS came with the fields.
+#ifdef B_DIRECT_DEVICE_PIXELS
+#	define DIRECT_DEVICE_SCALE(info) ((info)->device_scale)
+#	define DIRECT_DRAWING_AREA(info) ((info)->drawing_bits_area)
+#	define DIRECT_DRAWING_BYTES_PER_ROW(info) ((info)->drawing_bytes_per_row)
+#else
+#	define DIRECT_DEVICE_SCALE(info) ((info)->_reserved1[0])
+#	define DIRECT_DRAWING_AREA(info) ((area_id)(info)->_reserved1[1])
+#	define DIRECT_DRAWING_BYTES_PER_ROW(info) ((int32)(info)->_reserved1[2])
+#endif
 
 
 namespace airtime {
@@ -370,8 +387,9 @@ VideoView::DirectConnected(direct_buffer_info* info)
 					info->bits, (int32)info->bytes_per_row,
 					info->window_bounds.left, info->window_bounds.top,
 					info->window_bounds.right, info->window_bounds.bottom,
-					(uint32)info->_reserved1[0], (int32)info->_reserved1[1],
-					(int32)info->_reserved1[2]);
+					(uint32)DIRECT_DEVICE_SCALE(info),
+					(int32)DIRECT_DRAWING_AREA(info),
+					(int32)DIRECT_DRAWING_BYTES_PER_ROW(info));
 			}
 			bool usable = info->bits != NULL && info->bits_per_pixel == 32
 				&& (info->pixel_format == B_RGB32
@@ -384,12 +402,10 @@ VideoView::DirectConnected(direct_buffer_info* info)
 			fDirectClips.assign(info->clip_list,
 				info->clip_list + info->clip_list_count);
 
-			// The fields an app_server that keeps direct windows connected
-			// at a higher density adds, in what used to be reserved: the
-			// density and its copy of the screen. Zero from any other.
-			// The density is in percent.
-			uint32 percent = info->_reserved1[0];
-			area_id drawing = (area_id)info->_reserved1[1];
+			// The density and the app_server's copy of the screen; zero
+			// from an app_server without them. The density is in percent.
+			uint32 percent = DIRECT_DEVICE_SCALE(info);
+			area_id drawing = DIRECT_DRAWING_AREA(info);
 			fDirectScale = percent > 100 && percent <= 400
 				? percent / 100.0f : 1.0f;
 			if (fDirectScale != 1.0f) {
@@ -404,7 +420,7 @@ VideoView::DirectConnected(direct_buffer_info* info)
 					fDrawingSource = drawing;
 					fDrawingBits = fDrawingClone >= 0 ? (uint8*)bits : NULL;
 				}
-				fDrawingBytesPerRow = (int32)info->_reserved1[2];
+				fDrawingBytesPerRow = DIRECT_DRAWING_BYTES_PER_ROW(info);
 				// Without the copy, what is drawn would be erased by the
 				// next copy to the screen.
 				if (fDrawingBits == NULL)
@@ -695,19 +711,12 @@ void
 VideoView::_DrawAudioOnly(BRect updateRect)
 {
 	BRect bounds = Bounds();
-	BPoint origin = Frame().LeftTop();
-	metal::fill(this, updateRect, origin);
-	BRect surface = bounds;
-	if (Parent() != NULL) {
-		surface = Parent()->Bounds();
-		surface.OffsetBy(-Frame().left, -Frame().top);
-	}
-	metal::sheen(this, updateRect, surface);
+	look::surface(this, updateRect);
 
 	BRect panel = bounds.InsetByCopy(12, 10);
 	if (!panel.IsValid() || panel.Height() < 20)
 		return;
-	metal::lcd(this, panel);
+	look::lcd(this, panel);
 
 	BFont font(be_bold_font);
 	font.SetSize(15);
@@ -717,7 +726,7 @@ VideoView::_DrawAudioOnly(BRect updateRect)
 	font.GetHeight(&height);
 	BString title(fTitle);
 	font.TruncateString(&title, B_TRUNCATE_END, panel.Width() - 24);
-	SetHighColor(metal::lcd_text_color());
+	SetHighColor(look::lcd_text_color());
 	float baseline = panel.top + 10 + height.ascent;
 	DrawString(title.String(), BPoint(panel.left + 12, baseline));
 
@@ -726,7 +735,7 @@ VideoView::_DrawAudioOnly(BRect updateRect)
 	SetFont(&small);
 	BString detail(fDetail);
 	small.TruncateString(&detail, B_TRUNCATE_END, panel.Width() - 24);
-	SetHighColor(metal::lcd_dim_text_color());
+	SetHighColor(look::lcd_dim_text_color());
 	DrawString(detail.String(), BPoint(panel.left + 12, baseline + 20));
 	SetDrawingMode(B_OP_COPY);
 }

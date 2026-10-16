@@ -12,13 +12,13 @@
 #include <String.h>
 #include <View.h>
 
-#include "Metal.h"
+#include "Look.h"
 
 
 namespace airtime {
 
 /*!	The movie controller: timeline with playhead, transport buttons, volume
-	and the LCD. In the window it is brushed metal; in full screen it floats
+	and the LCD. In the window it is Amp's grey; in full screen it floats
 	over the picture in dark glass (`hud`). It only reports what the user
 	did, as messages to its target; the window decides what that means. */
 class ControlBar : public BView {

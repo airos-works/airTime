@@ -22,7 +22,7 @@
 #include "AppInfo.h"
 #include "ControlBar.h"
 #include "Messages.h"
-#include "Metal.h"
+#include "Look.h"
 #include "Player.h"
 #include "Settings.h"
 #include "VideoView.h"
@@ -258,10 +258,9 @@ public:
 
 	virtual void Draw(BRect updateRect)
 	{
-		metal::fill(this, updateRect);
-		metal::sheen(this, updateRect, Bounds());
+		look::surface(this, updateRect);
 		if (fVideo != NULL && fPlayer->HasVideo())
-			metal::inset_frame(this, fVideo->Frame());
+			look::inset_frame(this, fVideo->Frame());
 	}
 
 	virtual void MessageReceived(BMessage* message)

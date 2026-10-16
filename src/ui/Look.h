@@ -2,23 +2,23 @@
  * Copyright 2026, air/OS contributors.
  * Distributed under the terms of the MIT License.
  */
-#ifndef AIRTIME_METAL_H
-#define AIRTIME_METAL_H
+#ifndef AIRTIME_LOOK_H
+#define AIRTIME_LOOK_H
 
 
 #include <GraphicsDefs.h>
 #include <Rect.h>
 
 
-class BBitmap;
 class BView;
 
 
 namespace airtime {
 
-/*!	The look of the QuickTime Player of Mac OS 9 and the first Mac OS X:
-	brushed aluminium, a recessed khaki LCD, round metal buttons. Everything
-	is drawn here so the window and the full screen controller agree. */
+/*!	The look of the window: the plain grey of Amp's toolbar, an LCD in its
+	colours and round buttons, so that the two players of air/OS look alike.
+	Everything is drawn here so the window, the audio panel, the Quick Look
+	panel and the full screen controller agree. */
 
 enum button_state {
 	BUTTON_NORMAL,
@@ -42,21 +42,23 @@ enum glyph_kind {
 	GLYPH_STEP_FORWARD
 };
 
-namespace metal {
+namespace look {
 
-// The aluminium texture, made once. It tiles in both directions.
-const BBitmap* texture();
+// Amp's toolbar greys: the surface around the picture is the light end,
+// the controller runs from it down to the dark end.
+const rgb_color kSurface = {236, 236, 236, 255};
+const rgb_color kSurfaceBottom = {176, 176, 176, 255};
+const rgb_color kBorder = {108, 108, 108, 255};
+const rgb_color kText = {70, 70, 70, 255};
 
-// Fills `rect` of `view` with brushed metal. `origin` is where the view
-// sits in the surface the texture should line up across (the window).
-void fill(BView* view, BRect rect, BPoint origin = BPoint(0, 0));
+// Fills `rect` of `view` with the plain surface grey.
+void surface(BView* view, BRect rect);
 
-// A light from the top: the window's metal gets a faint sheen and shade.
-// `surface` is the whole metal surface in the view's coordinates, so that
-// neighbouring views shade alike.
-void sheen(BView* view, BRect rect, BRect surface);
+// The controller's grey, Amp's toolbar: a gradient over `bar` (the whole
+// bar in the view's coordinates), drawn where it meets `rect`.
+void toolbar(BView* view, BRect rect, BRect bar);
 
-// A groove cut into the metal around `rect`.
+// A thin inset line around `rect`, where the picture sits in the surface.
 void inset_frame(BView* view, BRect rect, float radius = 0);
 
 void round_button(BView* view, BRect rect, button_state state,
@@ -64,7 +66,7 @@ void round_button(BView* view, BRect rect, button_state state,
 void glyph(BView* view, glyph_kind kind, BRect rect, rgb_color color);
 
 // The timeline: a recessed track, the played part, chapter marks and the
-// triangular playhead QuickTime used.
+// triangular playhead.
 void timeline_track(BView* view, BRect track, float playedTo, bool dark);
 void playhead(BView* view, BPoint tip, float height, button_state state,
 	bool dark);
@@ -83,8 +85,8 @@ void hud_panel(BView* view, BRect rect);
 rgb_color color(uint8 red, uint8 green, uint8 blue, uint8 alpha = 255);
 rgb_color mix(rgb_color a, rgb_color b, float amount);
 
-}	// namespace metal
+}	// namespace look
 
 }	// namespace airtime
 
-#endif	// AIRTIME_METAL_H
+#endif	// AIRTIME_LOOK_H

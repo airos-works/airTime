@@ -1,10 +1,10 @@
 # airTime
 
-The movie player of air/OS. It plays films and music in a window modelled on
-the QuickTime Player of Mac OS 9 and the first versions of Mac OS X —
-brushed aluminium, a khaki LCD, round metal transport buttons and the little
-pentagon playhead — and it does the decoding on the graphics hardware where
-it can.
+The movie player of air/OS. It plays films and music in a window laid out
+like the QuickTime Player of Mac OS 9 and the first versions of Mac OS X —
+a timeline with the little pentagon playhead, round transport buttons and an
+LCD — in the plain grey of Amp, air/OS's music player, and it does the
+decoding on the graphics hardware where it can.
 
 ![airTime icon](resources/branding/airtime-icon.svg)
 
@@ -182,7 +182,7 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
 
 ```
 src/engine/   playback: demuxing, decoding, clocks, subtitles, captions
-src/ui/       the window, the metal controller, the video view
+src/ui/       the window, the controller, the video view
 src/quicklook/ the Quick Look add-on: the engine and the video view in Tracker's panel
 src/          the application and its settings
 tests/        host-side tests of the engine (make check-host)
