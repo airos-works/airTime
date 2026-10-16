@@ -24,20 +24,24 @@
 
 
 // What an app_server that keeps direct windows connected at a higher
-// density adds to direct_buffer_info: the density in percent and its own
-// copy of the screen. Headers from before the fields have them as the first
-// three words of the reserved space; later ones name them, and the reserved
-// space begins after them, so the names have to be used where they exist.
-// B_DIRECT_DEVICE_PIXELS came with the fields.
-#ifdef B_DIRECT_DEVICE_PIXELS
-#	define DIRECT_DEVICE_SCALE(info) ((info)->device_scale)
-#	define DIRECT_DRAWING_AREA(info) ((info)->drawing_bits_area)
-#	define DIRECT_DRAWING_BYTES_PER_ROW(info) ((info)->drawing_bytes_per_row)
-#else
-#	define DIRECT_DEVICE_SCALE(info) ((info)->_reserved1[0])
-#	define DIRECT_DRAWING_AREA(info) ((area_id)(info)->_reserved1[1])
-#	define DIRECT_DRAWING_BYTES_PER_ROW(info) ((int32)(info)->_reserved1[2])
-#endif
+// density adds to direct_buffer_info: the density in percent, its own copy
+// of the screen and that copy's row size. Headers from before the fields
+// have them as the first three words of the reserved space; later ones name
+// them (device_scale, drawing_bits_area, drawing_bytes_per_row) and the
+// reserved space begins after them, so a reserved word read there is zero.
+// Nothing tells the two apart at compile time (B_DIRECT_DEVICE_PIXELS is
+// an enumerator), but in both the three words are the same distance before
+// clip_list_count, so they are read from there.
+static inline const uint32*
+direct_density_words(const direct_buffer_info* info)
+{
+	return &info->clip_list_count - 10;
+}
+
+#define DIRECT_DEVICE_SCALE(info) (direct_density_words(info)[0])
+#define DIRECT_DRAWING_AREA(info) ((area_id)direct_density_words(info)[1])
+#define DIRECT_DRAWING_BYTES_PER_ROW(info) \
+	((int32)direct_density_words(info)[2])
 
 
 namespace airtime {
