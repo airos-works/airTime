@@ -35,6 +35,10 @@ public:
 			status_t			OpenFile(const entry_ref& ref, bool play,
 									BString* error);
 			bool				IsEmpty() const { return !fHasFile; }
+			bool				IsPlaying()
+									{ return fHasFile && fPlayer->IsPlaying(); }
+			bool				HasChapters() const
+									{ return !fPlayer->Chapters().empty(); }
 			void				SetFullScreen(bool fullScreen);
 			void				SeekOnOpen(bigtime_t time)
 									{ fSeekOnOpen = time; }

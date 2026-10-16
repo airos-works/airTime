@@ -6,6 +6,8 @@
 
 #include "App.h"
 
+#include "MediaKeys.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -259,9 +261,82 @@ App::MessageReceived(BMessage* message)
 			alert->Go(NULL);
 			break;
 		}
+		case kMsgMediaKey:
+			_HandleMediaKey(message);
+			break;
 		default:
 			BApplication::MessageReceived(message);
 	}
+}
+
+
+/*!	A keyboard's media key from the system's mediakey command (see
+	MediaKeys.h): the query asks whether a window plays; the key goes to the
+	playing window, else the active one, else the first with a film. Next and
+	previous move between chapters.
+*/
+void
+App::_HandleMediaKey(BMessage* message)
+{
+	int32 key = message->GetInt32("key", -1);
+	bool query = message->GetBool("query", false);
+
+	PlayerWindow* chosen = NULL;
+	bool chosenPlaying = false;
+	bool chosenActive = false;
+	for (int32 i = 0; BWindow* window = WindowAt(i); i++) {
+		PlayerWindow* player = dynamic_cast<PlayerWindow*>(window);
+		if (player == NULL || !player->Lock())
+			continue;
+
+		bool canHandle = !player->IsEmpty();
+		if (key == B_MEDIA_KEY_NEXT || key == B_MEDIA_KEY_PREVIOUS)
+			canHandle = canHandle && player->HasChapters();
+		bool playing = player->IsPlaying();
+		bool active = player->IsActive();
+		player->Unlock();
+
+		if (!canHandle)
+			continue;
+		if (chosen == NULL || (playing && !chosenPlaying)
+			|| (playing == chosenPlaying && active && !chosenActive)) {
+			chosen = player;
+			chosenPlaying = playing;
+			chosenActive = active;
+		}
+	}
+
+	if (query) {
+		reply_media_key_query(message, chosen != NULL, chosenPlaying);
+		return;
+	}
+
+	bool handled = chosen != NULL;
+	if (handled) {
+		switch (key) {
+			case B_MEDIA_KEY_PLAY_PAUSE:
+				chosen->PostMessage(kMsgTogglePlay);
+				break;
+			case B_MEDIA_KEY_PLAY:
+				chosen->PostMessage(kMsgPlay);
+				break;
+			case B_MEDIA_KEY_PAUSE:
+			case B_MEDIA_KEY_STOP:
+				chosen->PostMessage(kMsgPause);
+				break;
+			case B_MEDIA_KEY_NEXT:
+			case B_MEDIA_KEY_PREVIOUS:
+			{
+				BMessage chapter(kMsgChapter);
+				chapter.AddInt32("step", key == B_MEDIA_KEY_NEXT ? 1 : -1);
+				chosen->PostMessage(&chapter);
+				break;
+			}
+			default:
+				handled = false;
+		}
+	}
+	reply_media_key_handled(message, handled);
 }
 
 

@@ -35,6 +35,7 @@ public:
 	static	int32				RegisterAsDefaultPlayer(bool force);
 
 private:
+			void				_HandleMediaKey(BMessage* message);
 			PlayerWindow*		_NewWindow();
 			PlayerWindow*		_EmptyWindow();
 			void				_Open(const entry_ref& ref,
