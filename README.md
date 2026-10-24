@@ -11,14 +11,14 @@ decoding on the graphics hardware where it can.
 <!-- airos-ci:latest-builds:start -->
 ## Latest builds
 
-Built automatically by air/OS CI from commit `13158f1` on 2026-10-24 ([all files](https://github.com/jmgasper/airTime/releases/tag/latest)).
+Built automatically by air/OS CI from commit `b8bf4d3` on 2026-10-24 ([all files](https://github.com/jmgasper/airTime/releases/tag/latest)).
 
 | Architecture | Package |
 |---|---|
 | arm64 | [airtime-1.0.0-22-arm64.hpkg](https://github.com/jmgasper/airTime/releases/download/latest/airtime-1.0.0-22-arm64.hpkg) |
 | x86_64 | [airtime-1.0.0-22-x86_64.hpkg](https://github.com/jmgasper/airTime/releases/download/latest/airtime-1.0.0-22-x86_64.hpkg) |
 
-Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-1808-gabac2ffbda, arm64 hrev60207-1808-gabac2ffbda.
+Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-1815-ge834c5d026, arm64 hrev60207-1815-ge834c5d026.
 <!-- airos-ci:latest-builds:end -->
 
 ## What it does
