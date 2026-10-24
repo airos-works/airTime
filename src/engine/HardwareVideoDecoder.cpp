@@ -104,6 +104,13 @@ const HardwareDecoderKind kKinds[] = {
 	{"sunxi_cedar", "Allwinner Cedar", {{AV_CODEC_ID_H264, 4096, 2304, 8},
 		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
 		false, 1, true},
+	// The Qualcomm SC8280XP's Iris video codec (the qcom_video add-on of the
+	// air/OS tree, Radxa Dragon Q8B): progressive eight bit 4:2:0 H.264 and
+	// HEVC Main up to 4096x2304, as I420 and NV12; decoder 1 refuses what
+	// it does not decode rather than going on in software.
+	{"qcom_video", "Qualcomm Iris", {{AV_CODEC_ID_H264, 4096, 2304, 8},
+		{AV_CODEC_ID_HEVC, 4096, 2304, 8}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
+		false, 1, true},
 };
 
 // Not among Haiku's colour spaces: 4:2:0 as a plane of luma then one of Cb
