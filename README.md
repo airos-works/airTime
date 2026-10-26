@@ -273,9 +273,9 @@ MIT. FFmpeg is LGPL 2.1 and is used as shared libraries.
 
 ## Native application icon
 
-The icon was redesigned on 26 October 2026 as an original film projector with paired reels and a play control.
+The icon was redesigned on 26 October 2026 as an original closed movie clapperboard with a play symbol.
 It follows the [Haiku icon guidelines](https://www.haiku-os.org/development/icon-guidelines):
-upright edges, perspective with 2:1 front and 1:1 receding floor-contact edges,
+upright edges and restrained perspective,
 light from the upper left, darker right faces, a rightward floor shadow and
 a black silhouette outline one pixel wide at 32px. Broad details target 16px
 and 32px. The artwork is MIT-licensed and drawn directly in vectors, without
@@ -298,4 +298,4 @@ g++ -std=c++17 tools/render-icon.cpp -o /tmp/render-airtime-icon -lbe -ltranslat
 The checked-in PNG preview is a native render. Check changes at 16, 32, 64 and
 128px on light and dark backgrounds before replacing the icon.
 [Artwork attribution](resources/ICON-ATTRIBUTION.md) records the files and licence.
-Package version `1.0.0-23` includes this update.
+Package version `1.0.0-24` includes this refinement.

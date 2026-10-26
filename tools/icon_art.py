@@ -53,6 +53,22 @@ class Drawing:
             points = [tuple(project(p) for p in point) for point in points]
         self.shape(points, paint, outline, width)
 
+    def rounded_rect(self, x, y, w, h, r, paint, outline=None, width=2, project=None):
+        k = 0.55228475 * r
+        points = [
+            ((x+r,y),(x+r-k,y),(x+r,y)),
+            ((x+w-r,y),(x+w-r,y),(x+w-r+k,y)),
+            ((x+w,y+r),(x+w,y+r-k),(x+w,y+r)),
+            ((x+w,y+h-r),(x+w,y+h-r),(x+w,y+h-r+k)),
+            ((x+w-r,y+h),(x+w-r+k,y+h),(x+w-r,y+h)),
+            ((x+r,y+h),(x+r,y+h),(x+r-k,y+h)),
+            ((x,y+h-r),(x,y+h-r+k),(x,y+h-r)),
+            ((x,y+r),(x,y+r),(x,y+r-k)),
+        ]
+        if project:
+            points = [tuple(project(p) for p in point) for point in points]
+        self.shape(points, paint, outline, width)
+
     def shadow(self, points):
         self.shape(points, hvif.linear_gradient((20, 52), (62, 52), [
             (0, (0, 0, 0, 65)), (0.75, (0, 0, 0, 40)), (1, (0, 0, 0, 0))]))
