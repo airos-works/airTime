@@ -17,6 +17,7 @@
 #include <InterfaceDefs.h>
 #include <Message.h>
 #include <Region.h>
+#include <Screen.h>
 #include <Window.h>
 
 #include "Messages.h"
@@ -305,11 +306,12 @@ VideoView::DisplayFrame(const VideoFramePtr& frame)
 	}
 
 	static const bool sTrace = getenv("AIRTIME_TRACE_DROPS") != NULL;
+	static const bool sNoVsync = getenv("AIRTIME_NO_VSYNC") != NULL;
 	bigtime_t entered = system_time();
 	std::lock_guard<std::mutex> render(fRenderLock);
 	int next = fCurrent ^ 1;
 	bigtime_t start = system_time();
-	if (scale == 1.0f && _RenderDirect(frame, rect, width, height)) {
+	if (sNoVsync && scale == 1.0f && _RenderDirect(frame, rect, width, height)) {
 		// The bitmaps do not have this picture: should the view have to
 		// draw itself, it makes it again.
 		fLastFrame = frame;
@@ -323,6 +325,19 @@ VideoView::DisplayFrame(const VideoFramePtr& frame)
 	fLastFrame = frame;
 	bigtime_t composed = system_time();
 	fComposeTime = (fComposeTime * 15 + (composed - start)) / 16;
+
+	if (!sNoVsync) {
+		// The display scans the frame buffer while a direct picture is
+		// written into it: the top of the screen shows the new picture and
+		// the bottom the old, a tear line marching down the screen. The
+		// driver releases a semaphore at the vertical blank; waiting for it
+		// puts the copy right after the blank, ahead of the scan, and the
+		// picture changes whole. Where there is no semaphore this returns
+		// at once and the copy is as torn as before.
+		BScreen screen(Window());
+		if (screen.IsValid())
+			screen.WaitForRetrace(30000);
+	}
 
 	if (_DrawDirect(fBitmaps[next], rect)) {
 		fCurrent = next;
@@ -512,7 +527,10 @@ VideoView::UpdateWindowOrigin()
 	visible in one piece and nothing is to be drawn over it. Making it in a
 	bitmap and copying that means twice the pixels written and once read,
 	and moving memory is what a small board is slowest at: on the Raspberry
-	Pi 4 this halves the time a picture takes.
+	Pi 4 this halves the time a picture takes. It also tears (the display
+	scans the buffer mid-write), so it is used only with AIRTIME_NO_VSYNC;
+	by default the picture is made in a bitmap and copied at the vertical
+	blank instead.
 	AIRTIME_NO_DIRECT_RENDER leaves it off.
 */
 bool
