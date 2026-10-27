@@ -91,9 +91,12 @@ const HardwareDecoderKind kKinds[] = {
 		{AV_CODEC_ID_NONE, 0, 0, 0}}, 0, false, 0},
 	// The HEVC decoder block of the Raspberry Pi 4's SoC (the rpi_hevc
 	// add-on of the air/OS tree): Main and Main 10, as I420 and P010.
+	// A 4K film on a 1080p screen comes over at half size, as from Cedar
+	// below: at full size a 4K HDR film made 14 pictures a second, the
+	// add-on's copy and the scaling and tone mapping each about 50 ms.
 	{"rpi_hevc", "Raspberry Pi HEVC decoder",
 		{{AV_CODEC_ID_HEVC, 4096, 4096, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
-		false, 0},
+		false, 0, true},
 	// The Cedar video engine of the Allwinner A733 (the 00_sunxi_cedar add-on
 	// of the air/OS tree, Radxa Cubie A7S): progressive 4:2:0 H.264 (eight
 	// bit), and HEVC Main and Main 10, up to 4096 wide; I420 and NV12, and
@@ -242,9 +245,11 @@ is_ten_bit(const AVCodecParameters* parameters)
 
 
 /*!	Whether a picture half as wide and high as the stream's shows all the
-	screen can: the screens together are no larger, in their own pixels (a
+	screen can: the film, fitted into the screen (in its own pixels: a
 	desktop drawn at a higher density has more of them than its frame
-	says). AIRTIME_HW_HALF=0 never asks for half pictures, =1 always. */
+	says), is shown at no more than half its size. A 4K film in scope or 2:1
+	is 3840 wide but less than 2160 high, and fills a 1080p screen's width
+	at half. AIRTIME_HW_HALF=0 never asks for half pictures, =1 always. */
 static bool
 half_size_is_enough(const AVCodecParameters* parameters)
 {
@@ -261,7 +266,17 @@ half_size_is_enough(const AVCodecParameters* parameters)
 		width = std::max(width, (int64)mode.virtual_width);
 		height = std::max(height, (int64)mode.virtual_height);
 	}
-	return width * 2 <= parameters->width && height * 2 <= parameters->height;
+	if (parameters->width <= 0 || parameters->height <= 0)
+		return false;
+	// the width as shown, for pixels that are not square
+	double aspect = 1;
+	if (parameters->sample_aspect_ratio.num > 0
+		&& parameters->sample_aspect_ratio.den > 0) {
+		aspect = av_q2d(parameters->sample_aspect_ratio);
+	}
+	double scale = std::min(width / (parameters->width * aspect),
+		(double)height / parameters->height);
+	return scale * std::max(aspect, 1.0) <= 0.5;
 }
 
 
