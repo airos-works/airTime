@@ -11,14 +11,14 @@ decoding on the graphics hardware where it can.
 <!-- airos-ci:latest-builds:start -->
 ## Latest builds
 
-Built automatically by air/OS CI from commit `b75ed68` on 2026-10-27 ([all files](https://github.com/jmgasper/airTime/releases/tag/latest)).
+Built automatically by air/OS CI from commit `53eb856` on 2026-10-29 ([all files](https://github.com/airos-works/airTime/releases/tag/latest)).
 
 | Architecture | Package |
 |---|---|
-| arm64 | [airtime-1.0.0-26-arm64.hpkg](https://github.com/jmgasper/airTime/releases/download/latest/airtime-1.0.0-26-arm64.hpkg) |
-| x86_64 | [airtime-1.0.0-26-x86_64.hpkg](https://github.com/jmgasper/airTime/releases/download/latest/airtime-1.0.0-26-x86_64.hpkg) |
+| arm64 | [airtime-1.0.0-27-arm64.hpkg](https://github.com/airos-works/airTime/releases/download/latest/airtime-1.0.0-27-arm64.hpkg) |
+| x86_64 | [airtime-1.0.0-27-x86_64.hpkg](https://github.com/airos-works/airTime/releases/download/latest/airtime-1.0.0-27-x86_64.hpkg) |
 
-Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-2038-g01f2011265, arm64 hrev60207-2038-g01f2011265.
+Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-2112-g182e48b61c, arm64 hrev60207-2112-g182e48b61c.
 <!-- airos-ci:latest-builds:end -->
 
 ## What it does
