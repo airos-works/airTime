@@ -11,7 +11,7 @@ decoding on the graphics hardware where it can.
 <!-- airos-ci:latest-builds:start -->
 ## Latest builds
 
-Built automatically by air/OS CI from commit `646c5e7` on 2026-10-30 ([all files](https://github.com/airos-works/airTime/releases/tag/latest)).
+Built automatically by air/OS CI from commit `269e562` on 2026-10-30 ([all files](https://github.com/airos-works/airTime/releases/tag/latest)).
 
 | Architecture | Package |
 |---|---|
