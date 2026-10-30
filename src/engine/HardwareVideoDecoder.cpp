@@ -306,7 +306,11 @@ stream_is_eligible(const LoadedAddOn& addOn, AVStream* stream,
 			avcodec_get_name(parameters->codec_id), av_get_pix_fmt_name(format));
 		return false;
 	}
-	if (parameters->field_order != AV_FIELD_UNKNOWN
+	// (HEVC, VP9 and AV1 have no fields: their pictures are frames whatever
+	// the container says, as with recordings muxed with a field order)
+	bool fieldCoding = parameters->codec_id == AV_CODEC_ID_H264
+		|| parameters->codec_id == AV_CODEC_ID_MPEG2VIDEO;
+	if (fieldCoding && parameters->field_order != AV_FIELD_UNKNOWN
 		&& parameters->field_order != AV_FIELD_PROGRESSIVE) {
 		reason->SetToFormat("%s does not decode interlaced pictures",
 			kind.displayName);
