@@ -112,7 +112,8 @@ const HardwareDecoderKind kKinds[] = {
 	// HEVC Main and Main 10, up to 4096x2304, as I420 and NV12, and P010
 	// for ten bits; decoder 1 refuses what it does not decode rather than
 	// going on in software. An add-on older than Main 10 refuses those
-	// streams, which then go to libavcodec.
+	// streams, which then go to libavcodec. (Its VP9 is not ready: the
+	// firmware stalls.)
 	{"00_qcom_video", "Qualcomm Iris", {{AV_CODEC_ID_H264, 4096, 2304, 8},
 		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
 		false, 1, true},
