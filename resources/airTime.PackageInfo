@@ -1,5 +1,5 @@
 name airtime
-version 1.0.0-30
+version 1.0.0-31
 architecture x86_64
 summary "The movie player of air/OS"
 description "airTime plays films and music in a window laid out like the QuickTime Player of Mac OS 9 and early Mac OS X, a timeline, round transport buttons and an LCD, in the plain grey of Amp. It plays every format FFmpeg reads, decodes video on the graphics hardware where it can (NVDEC on GeForce cards, the RK3588's video decoders on the ROCK 5), and offers subtitles (embedded, picture based and SubRip/ASS/WebVTT files), closed captions, audio tracks in several languages, fast forward and rewind, playback from half to triple speed with the pitch kept, frame stepping, seeking to any time and full screen."

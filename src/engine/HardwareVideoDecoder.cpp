@@ -46,7 +46,7 @@ struct CodecLimits {
 struct HardwareDecoderKind {
 	const char*		leafName;
 	const char*		displayName;
-	CodecLimits		codecs[4];
+	CodecLimits		codecs[5];
 	int				maxReferenceFrames;	// H.264 only; 0 = no limit
 	// The NVDEC add-on writes Cb Y0 Cr Y1 where Haiku's B_YCbCr422 means
 	// Y0 Cb Y1 Cr.
@@ -58,6 +58,9 @@ struct HardwareDecoderKind {
 	// Gives pictures half as wide and high (P010 and I420) when asked
 	// for exactly that, in the pass that copies them anyway.
 	bool			halfSize;
+	// Decodes H.264 and MPEG-2 fields up to this wide, as frames of two
+	// woven fields that airTime deinterlaces; 0: no fields.
+	int				maxFieldWidth;
 };
 
 const HardwareDecoderKind kKinds[] = {
@@ -108,15 +111,16 @@ const HardwareDecoderKind kKinds[] = {
 		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
 		false, 1, true},
 	// The Qualcomm SC8280XP's Iris video codec (the 00_qcom_video add-on of the
-	// air/OS tree, Radxa Dragon Q8B): progressive eight bit 4:2:0 H.264
-	// (the add-on also takes fields up to 1440 wide, which airTime keeps for
-	// its deinterlacer), HEVC Main and Main 10, and VP9 profile 0, up to
-	// 4096x2304, as I420 and NV12, and P010 for ten bits; decoder 1 refuses
-	// what it does not decode rather than going on in software. An older
-	// add-on refuses Main 10 and VP9 streams, which then go to libavcodec.
+	// air/OS tree, Radxa Dragon Q8B): eight bit 4:2:0 H.264, HEVC Main and
+	// Main 10, and VP9 profile 0, up to 4096x2304, and MPEG-2 up to
+	// 1920x1920, as I420 and NV12, and P010 for ten bits; fields (H.264,
+	// MPEG-2) up to 1920 wide. Decoder 1 refuses what it does not decode
+	// rather than going on in software. An older add-on refuses Main 10,
+	// VP9, MPEG-2 and fields, which then go to libavcodec.
 	{"00_qcom_video", "Qualcomm Iris", {{AV_CODEC_ID_H264, 4096, 2304, 8},
 		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_VP9, 4096, 2304, 8},
-		{AV_CODEC_ID_NONE, 0, 0, 0}}, 0, false, 1, true},
+		{AV_CODEC_ID_MPEG2VIDEO, 1920, 1920, 8}, {AV_CODEC_ID_NONE, 0, 0, 0}},
+		0, false, 1, true, 1920},
 };
 
 // Not among Haiku's colour spaces: 4:2:0 as a plane of luma then one of Cb
@@ -310,8 +314,9 @@ stream_is_eligible(const LoadedAddOn& addOn, AVStream* stream,
 	// the container says, as with recordings muxed with a field order)
 	bool fieldCoding = parameters->codec_id == AV_CODEC_ID_H264
 		|| parameters->codec_id == AV_CODEC_ID_MPEG2VIDEO;
+	bool fieldsDecoded = parameters->width <= kind.maxFieldWidth;
 	if (fieldCoding && parameters->field_order != AV_FIELD_UNKNOWN
-		&& parameters->field_order != AV_FIELD_PROGRESSIVE) {
+		&& parameters->field_order != AV_FIELD_PROGRESSIVE && !fieldsDecoded) {
 		reason->SetToFormat("%s does not decode interlaced pictures",
 			kind.displayName);
 		return false;
@@ -342,7 +347,7 @@ stream_is_eligible(const LoadedAddOn& addOn, AVStream* stream,
 					kind.displayName);
 				return false;
 			}
-			if (!info.frameMbsOnly) {
+			if (!info.frameMbsOnly && !fieldsDecoded) {
 				reason->SetToFormat("the stream may contain fields, which %s "
 					"does not decode", kind.displayName);
 				return false;
@@ -418,12 +423,19 @@ public:
 		fRowBytes(0),
 		fFrameDuration(_FrameDuration()),
 		fBufferPool(NULL),
-		fBufferSize(0)
+		fBufferSize(0),
+		fFields(false),
+		fTopFieldFirst(true),
+		fDeinterlaceGraph(NULL),
+		fDeinterlaceSource(NULL),
+		fDeinterlaceSink(NULL)
 	{
 	}
 
 	~MediaKitVideoDecoder()
 	{
+		_FreeDeinterlacer();
+		fReady.clear();
 		delete fDecoder;
 		av_buffer_pool_uninit(&fBufferPool);
 		av_packet_free(&fChunk);
@@ -506,6 +518,7 @@ public:
 		fEncodedFormat = encoded;
 		fWidth = parameters->width;
 		fHeight = parameters->height;
+		fFields = _HasFields(&fTopFieldFirst);
 		return B_OK;
 	}
 
@@ -531,6 +544,8 @@ public:
 				return B_ERROR;
 			if (fFlushPending) {
 				fDecoder->SeekedTo(0, 0);
+				_FreeDeinterlacer();
+				fReady.clear();
 				fFlushPending = false;
 				fEndOfStream = false;
 				fDrained = false;
@@ -548,6 +563,11 @@ public:
 				fFlushPending = true;
 				fPendingSerial = fQueue->Serial();
 				continue;
+			}
+			if (!fReady.empty() && !fQueue->HasNewerSerial(fSerial)) {
+				output = fReady.front();
+				fReady.pop_front();
+				return B_OK;
 			}
 			if (fDrained && !fQueue->HasNewerSerial(fSerial))
 				return B_LAST_BUFFER_ERROR;
@@ -616,8 +636,16 @@ public:
 				continue;
 			if (status != B_OK) {
 				if (fEndOfStream) {
-					// Everything the decoder held has come out.
+					// Everything the decoder held has come out, and then what
+					// the deinterlacer still holds.
 					fDrained = true;
+					if (fDeinterlaceGraph != NULL) {
+						if (av_buffersrc_add_frame(fDeinterlaceSource, NULL) >= 0)
+							_TakeDeinterlaced();
+						_FreeDeinterlacer();
+						if (!fReady.empty())
+							continue;
+					}
 					return B_LAST_BUFFER_ERROR;
 				}
 				return status;
@@ -640,6 +668,8 @@ public:
 			frame->frame->chroma_location
 				= fStream->codecpar->chroma_location;
 			_AddLightLevels(frame->frame);
+			if (fFields && !fKeyframesOnly && _Deinterlace(frame))
+				continue;
 			output = frame;
 			return B_OK;
 		}
@@ -855,6 +885,131 @@ private:
 		}
 	}
 
+	/*!	Whether the add-on gives frames of two woven fields: an H.264 or
+		MPEG-2 stream the container says is interlaced, or H.264 whose
+		sequence parameter set allows fields. */
+	bool _HasFields(bool* _topFirst) const
+	{
+		const AVCodecParameters* parameters = fStream->codecpar;
+		*_topFirst = parameters->field_order != AV_FIELD_BB
+			&& parameters->field_order != AV_FIELD_BT;
+		if (fAddOn.kind->maxFieldWidth == 0
+			|| getenv("AIRTIME_NO_DEINTERLACE") != NULL)
+			return false;
+		if (parameters->codec_id != AV_CODEC_ID_H264
+			&& parameters->codec_id != AV_CODEC_ID_MPEG2VIDEO)
+			return false;
+		switch (parameters->field_order) {
+			case AV_FIELD_TT:
+			case AV_FIELD_BB:
+			case AV_FIELD_TB:
+			case AV_FIELD_BT:
+				return true;
+			case AV_FIELD_PROGRESSIVE:
+				return false;
+			default:
+				break;
+		}
+		if (parameters->codec_id != AV_CODEC_ID_H264)
+			return false;
+		H264SequenceInfo info;
+		int lengthSize = nal_length_size(false, parameters->extradata,
+			parameters->extradata_size);
+		return find_h264_sps(parameters->extradata, parameters->extradata_size,
+				lengthSize, &info)
+			&& !info.frameMbsOnly;
+	}
+
+	/*!	Sends a frame of two fields through libavfilter's bwdif, a picture a
+		field, as the software decoder does; false for a frame to be shown
+		as it is. */
+	bool _Deinterlace(const VideoFramePtr& frame)
+	{
+		AVFrame* picture = frame->frame;
+		if (fDeinterlaceGraph == NULL && !_SetupDeinterlacer()) {
+			fFields = false;
+			return false;
+		}
+#ifdef AV_FRAME_FLAG_INTERLACED
+		picture->flags |= AV_FRAME_FLAG_INTERLACED;
+		if (fTopFieldFirst)
+			picture->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
+		else
+			picture->flags &= ~AV_FRAME_FLAG_TOP_FIELD_FIRST;
+#else
+		picture->interlaced_frame = 1;
+		picture->top_field_first = fTopFieldFirst;
+#endif
+		picture->pts = frame->pts;
+		if (av_buffersrc_add_frame(fDeinterlaceSource, picture) < 0)
+			return false;
+		_TakeDeinterlaced();
+		return true;
+	}
+
+	void _TakeDeinterlaced()
+	{
+		for (;;) {
+			VideoFramePtr field = std::make_shared<VideoFrame>();
+			if (av_buffersink_get_frame(fDeinterlaceSink, field->frame) < 0)
+				return;
+			// (in field mode, bwdif's time base is half the source's)
+			field->pts = av_rescale_q(field->frame->pts,
+				av_buffersink_get_time_base(fDeinterlaceSink),
+				AVRational{1, 1000000});
+			field->duration = fFrameDuration / 2;
+			field->serial = fSerial;
+			field->hardware = true;
+			fReady.push_back(field);
+		}
+	}
+
+	bool _SetupDeinterlacer()
+	{
+		fDeinterlaceGraph = avfilter_graph_alloc();
+		if (fDeinterlaceGraph == NULL)
+			return false;
+		fDeinterlaceGraph->nb_threads = 4;
+		AVRational aspect = fStream->codecpar->sample_aspect_ratio;
+		if (aspect.num <= 0 || aspect.den <= 0)
+			aspect = AVRational{1, 1};
+		AVRational rate = av_guess_frame_rate(NULL, fStream, NULL);
+		if (rate.num <= 0 || rate.den <= 0)
+			rate = AVRational{25, 1};
+		char arguments[256];
+		snprintf(arguments, sizeof(arguments),
+			"video_size=%dx%d:pix_fmt=%d:time_base=1/1000000:"
+			"pixel_aspect=%d/%d:frame_rate=%d/%d", fWidth, fHeight,
+			fPixelFormat, aspect.num, aspect.den, rate.num, rate.den);
+		AVFilterContext* deinterlacer = NULL;
+		if (avfilter_graph_create_filter(&fDeinterlaceSource,
+				avfilter_get_by_name("buffer"), "in", arguments, NULL,
+				fDeinterlaceGraph) < 0
+			|| avfilter_graph_create_filter(&deinterlacer,
+				avfilter_get_by_name("bwdif"), "deinterlace",
+				"mode=send_field:parity=auto:deint=all", NULL,
+				fDeinterlaceGraph) < 0
+			|| avfilter_graph_create_filter(&fDeinterlaceSink,
+				avfilter_get_by_name("buffersink"), "out", NULL, NULL,
+				fDeinterlaceGraph) < 0
+			|| avfilter_link(fDeinterlaceSource, 0, deinterlacer, 0) < 0
+			|| avfilter_link(deinterlacer, 0, fDeinterlaceSink, 0) < 0
+			|| avfilter_graph_config(fDeinterlaceGraph, NULL) < 0) {
+			fprintf(stderr, "airTime: no deinterlacer for the hardware "
+				"decoder's pictures\n");
+			_FreeDeinterlacer();
+			return false;
+		}
+		return true;
+	}
+
+	void _FreeDeinterlacer()
+	{
+		avfilter_graph_free(&fDeinterlaceGraph);
+		fDeinterlaceSource = NULL;
+		fDeinterlaceSink = NULL;
+	}
+
 	const LoadedAddOn&	fAddOn;
 	Decoder*			fDecoder;
 	media_format		fEncodedFormat;
@@ -877,6 +1032,13 @@ private:
 	// fill the first time, so their buffers are used again.
 	AVBufferPool*		fBufferPool;
 	size_t				fBufferSize;
+	// fields: their frames through bwdif, the pictures it gives in fReady
+	bool				fFields;
+	bool				fTopFieldFirst;
+	AVFilterGraph*		fDeinterlaceGraph;
+	AVFilterContext*	fDeinterlaceSource;
+	AVFilterContext*	fDeinterlaceSink;
+	std::deque<VideoFramePtr> fReady;
 };
 
 status_t
