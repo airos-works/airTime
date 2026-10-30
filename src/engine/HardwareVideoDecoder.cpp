@@ -108,15 +108,15 @@ const HardwareDecoderKind kKinds[] = {
 		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
 		false, 1, true},
 	// The Qualcomm SC8280XP's Iris video codec (the 00_qcom_video add-on of the
-	// air/OS tree, Radxa Dragon Q8B): progressive eight bit 4:2:0 H.264, and
-	// HEVC Main and Main 10, up to 4096x2304, as I420 and NV12, and P010
-	// for ten bits; decoder 1 refuses what it does not decode rather than
-	// going on in software. An add-on older than Main 10 refuses those
-	// streams, which then go to libavcodec. (Its VP9 is not ready: the
-	// firmware stalls.)
+	// air/OS tree, Radxa Dragon Q8B): progressive eight bit 4:2:0 H.264
+	// (the add-on also takes fields up to 1440 wide, which airTime keeps for
+	// its deinterlacer), HEVC Main and Main 10, and VP9 profile 0, up to
+	// 4096x2304, as I420 and NV12, and P010 for ten bits; decoder 1 refuses
+	// what it does not decode rather than going on in software. An older
+	// add-on refuses Main 10 and VP9 streams, which then go to libavcodec.
 	{"00_qcom_video", "Qualcomm Iris", {{AV_CODEC_ID_H264, 4096, 2304, 8},
-		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
-		false, 1, true},
+		{AV_CODEC_ID_HEVC, 4096, 2304, 10}, {AV_CODEC_ID_VP9, 4096, 2304, 8},
+		{AV_CODEC_ID_NONE, 0, 0, 0}}, 0, false, 1, true},
 };
 
 // Not among Haiku's colour spaces: 4:2:0 as a plane of luma then one of Cb
