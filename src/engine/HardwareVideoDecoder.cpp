@@ -654,6 +654,14 @@ public:
 				continue;
 
 			fPacketsWithoutFrame = 0;
+			// Broadcasts switch to fields mid-stream: the air/OS add-ons
+			// mark a picture of two woven fields with a field_sequence of
+			// 2, and deinterlacing starts with the first.
+			if (!fFields && fAddOn.kind->maxFieldWidth > 0
+				&& header.u.raw_video.field_sequence == 2
+				&& getenv("AIRTIME_NO_DEINTERLACE") == NULL) {
+				fFields = true;
+			}
 			frame->pts = _MediaTime(header.start_time);
 			frame->duration = fFrameDuration;
 			frame->serial = fSerial;
