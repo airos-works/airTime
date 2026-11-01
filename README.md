@@ -11,12 +11,12 @@ decoding on the graphics hardware where it can.
 <!-- airos-ci:latest-builds:start -->
 ## Latest builds
 
-Built automatically by air/OS CI from commit `3ca21d5` on 2026-11-01 ([all files](https://github.com/airos-works/airTime/releases/tag/latest)).
+Built automatically by air/OS CI from commit `1a935c2` on 2026-11-01 ([all files](https://github.com/airos-works/airTime/releases/tag/latest)).
 
 | Architecture | Package |
 |---|---|
-| arm64 | [airtime-1.0.0-33-arm64.hpkg](https://github.com/airos-works/airTime/releases/download/latest/airtime-1.0.0-33-arm64.hpkg) |
-| x86_64 | [airtime-1.0.0-33-x86_64.hpkg](https://github.com/airos-works/airTime/releases/download/latest/airtime-1.0.0-33-x86_64.hpkg) |
+| arm64 | [airtime-1.0.0-34-arm64.hpkg](https://github.com/airos-works/airTime/releases/download/latest/airtime-1.0.0-34-arm64.hpkg) |
+| x86_64 | [airtime-1.0.0-34-x86_64.hpkg](https://github.com/airos-works/airTime/releases/download/latest/airtime-1.0.0-34-x86_64.hpkg) |
 
 Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-2182-g22fd68ce8c, arm64 hrev60207-2182-g22fd68ce8c.
 <!-- airos-ci:latest-builds:end -->
