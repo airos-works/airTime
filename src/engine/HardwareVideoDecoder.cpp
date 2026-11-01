@@ -84,10 +84,14 @@ const HardwareDecoderKind kKinds[] = {
 	// Rockchip MPP on the RK3588: RKVDEC for H.264 and HEVC (Main and
 	// Main 10), VPU981 for AV1 (Main, eight and ten bits), 4:2:0. Ten-bit
 	// pictures come over as P010; an add-on too old to give them fails the
-	// stream, which then goes to libavcodec.
+	// stream, which then goes to libavcodec. H.264 fields (PAFF and MBAFF)
+	// come as frames of two woven fields, which airTime deinterlaces. VP9
+	// (profiles 0 and 2) is RKVDEC's too, with an add-on and rk3588_vpu
+	// driver that know it; an older one refuses it.
 	{"00_rockchip_mpp", "RK3588 VPU", {{AV_CODEC_ID_H264, 8192, 4320, 8},
 		{AV_CODEC_ID_HEVC, 8192, 4320, 10}, {AV_CODEC_ID_AV1, 8192, 4320, 10},
-		{AV_CODEC_ID_NONE, 0, 0, 0}}, 0, false, 0},
+		{AV_CODEC_ID_VP9, 8192, 4320, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
+		false, 0, false, 4096},
 	// The Raspberry Pi's VideoCore firmware (the rpi_mmal add-on of the
 	// air/OS tree): H.264 up to 1080p, eight bit, as NV12.
 	{"rpi_mmal", "Raspberry Pi VideoCore", {{AV_CODEC_ID_H264, 1920, 1088, 8},
