@@ -46,7 +46,7 @@ struct CodecLimits {
 struct HardwareDecoderKind {
 	const char*		leafName;
 	const char*		displayName;
-	CodecLimits		codecs[5];
+	CodecLimits		codecs[8];
 	int				maxReferenceFrames;	// H.264 only; 0 = no limit
 	// The NVDEC add-on writes Cb Y0 Cr Y1 where Haiku's B_YCbCr422 means
 	// Y0 Cb Y1 Cr.
@@ -86,11 +86,15 @@ const HardwareDecoderKind kKinds[] = {
 	// pictures come over as P010; an add-on too old to give them fails the
 	// stream, which then goes to libavcodec. H.264 fields (PAFF and MBAFF)
 	// come as frames of two woven fields, which airTime deinterlaces. VP9
-	// (profiles 0 and 2) is RKVDEC's too, with an add-on and rk3588_vpu
-	// driver that know it; an older one refuses it.
+	// (profiles 0 and 2) is RKVDEC's too, and MPEG-1/2 (fields woven too)
+	// and MPEG-4 Part 2 up to 1920x1088 are VPU121's, with an add-on and
+	// rk3588_vpu driver that know them; an older one refuses them.
 	{"00_rockchip_mpp", "RK3588 VPU", {{AV_CODEC_ID_H264, 8192, 4320, 8},
 		{AV_CODEC_ID_HEVC, 8192, 4320, 10}, {AV_CODEC_ID_AV1, 8192, 4320, 10},
-		{AV_CODEC_ID_VP9, 8192, 4320, 10}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
+		{AV_CODEC_ID_VP9, 8192, 4320, 10},
+		{AV_CODEC_ID_MPEG2VIDEO, 1920, 1088, 8},
+		{AV_CODEC_ID_MPEG1VIDEO, 1920, 1088, 8},
+		{AV_CODEC_ID_MPEG4, 1920, 1088, 8}, {AV_CODEC_ID_NONE, 0, 0, 0}}, 0,
 		false, 0, false, 4096},
 	// The Raspberry Pi's VideoCore firmware (the rpi_mmal add-on of the
 	// air/OS tree): H.264 up to 1080p, eight bit, as NV12.
