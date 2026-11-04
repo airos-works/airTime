@@ -35,6 +35,7 @@ ControlBar::ControlBar(BRect frame, bool hud, const BMessenger& target)
 	fHasAudio(false),
 	fPosition(0),
 	fDuration(0),
+	fDrawnX(-1),
 	fPlaying(false),
 	fRate(1.0),
 	fScanning(false),
@@ -96,7 +97,6 @@ ControlBar::SetPosition(bigtime_t position, bigtime_t duration)
 {
 	if (position == fPosition && duration == fDuration)
 		return;
-	float oldX = _TimelineX(fPosition);
 	BString oldText = format_time(fPosition);
 	fPosition = position;
 	bool durationChanged = duration != fDuration;
@@ -105,8 +105,13 @@ ControlBar::SetPosition(bigtime_t position, bigtime_t duration)
 		Invalidate();
 		return;
 	}
-	if (fPressed != PART_TIMELINE && fabsf(_TimelineX(fPosition) - oldX) >= 0.5f)
+	// Compare with where the playhead was last drawn, not with the previous
+	// tick: on a long file each tick moves it far less than half a pixel.
+	if (fPressed != PART_TIMELINE
+		&& fabsf(_TimelineX(fPosition) - fDrawnX) >= 0.5f) {
+		fDrawnX = _TimelineX(fPosition);
 		Invalidate(fTimelineHit);
+	}
 	if (format_time(fPosition) != oldText && fShowLCD)
 		Invalidate(fLCD.InsetByCopy(-2, -2));
 }
@@ -470,6 +475,7 @@ ControlBar::_DrawTimeline()
 {
 	bigtime_t shown = fPressed == PART_TIMELINE ? fDragTime : fPosition;
 	float x = _TimelineX(shown);
+	fDrawnX = x;
 	look::timeline_track(this, fTrack, fHasMedia ? x : fTrack.left, fHud);
 
 	// Chapter marks.

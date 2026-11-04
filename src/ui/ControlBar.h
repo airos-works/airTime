@@ -89,6 +89,7 @@ private:
 			bool				fHasAudio;
 			bigtime_t			fPosition;
 			bigtime_t			fDuration;
+			float				fDrawnX;
 			bool				fPlaying;
 			double				fRate;
 			bool				fScanning;
