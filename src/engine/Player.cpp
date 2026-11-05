@@ -7,6 +7,7 @@
 #include "Player.h"
 
 #include <algorithm>
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1180,6 +1181,24 @@ Player::FormatName() const
 		return "";
 	return fFormat->iformat->long_name != NULL
 		? fFormat->iformat->long_name : fFormat->iformat->name;
+}
+
+
+TagMap
+Player::Tags() const
+{
+	TagMap tags;
+	if (fFormat == NULL)
+		return tags;
+	const AVDictionaryEntry* tag = NULL;
+	while ((tag = av_dict_get(fFormat->metadata, "", tag,
+			AV_DICT_IGNORE_SUFFIX)) != NULL) {
+		std::string key = tag->key;
+		for (char& c : key)
+			c = tolower((unsigned char)c);
+		tags[key] = tag->value;
+	}
+	return tags;
 }
 
 

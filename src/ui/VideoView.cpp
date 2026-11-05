@@ -57,6 +57,13 @@ VideoView::VideoView(BRect frame, const BMessenger& target)
 	fCurrent(0),
 	fDirty(false),
 	fMessageUntil(0),
+	fSkipHighlighted(false),
+	fSkipClicked(0),
+	fSkipOverlayHighlighted(false),
+	fSkipOverlayWidth(0),
+	fSkipOverlayHeight(0),
+	fSkipOverlayInset(0),
+	fSkipFloor(-1),
 	fAudioOnly(false),
 	fFullScreen(false),
 	fComposeTime(0),
@@ -158,6 +165,112 @@ VideoView::ShowMessage(const char* text)
 		fMessageUntil = system_time() + 1600000;
 	}
 	Refresh();
+}
+
+
+void
+VideoView::SetSkipButton(const char* label)
+{
+	BString text(label);
+	{
+		std::lock_guard<std::mutex> lock(fMessageLock);
+		if (text == fSkipLabel)
+			return;
+		fSkipLabel = text;
+		fSkipHighlighted = false;
+		fSkipFrame = BRect();
+	}
+	Refresh();
+}
+
+
+void
+VideoView::SetSkipButtonFloor(float top)
+{
+	{
+		std::lock_guard<std::mutex> lock(fMessageLock);
+		if (top == fSkipFloor)
+			return;
+		fSkipFloor = top;
+	}
+	Refresh();
+}
+
+
+bool
+VideoView::_SkipButtonShown()
+{
+	std::lock_guard<std::mutex> lock(fMessageLock);
+	return fSkipLabel.Length() > 0;
+}
+
+
+bool
+VideoView::_InSkipButton(BPoint where)
+{
+	std::lock_guard<std::mutex> lock(fMessageLock);
+	return fSkipLabel.Length() > 0 && fSkipFrame.IsValid()
+		&& fSkipFrame.Contains(where);
+}
+
+
+/*!	Called with fRenderLock held. The button is drawn into the picture, as
+	subtitles are: a view over the picture would turn off drawing straight
+	into the frame buffer for as long as it is shown. */
+void
+VideoView::_ComposeSkipButton(uint8* bits, int32 bytesPerRow, int width,
+	int height)
+{
+	BString label;
+	bool highlighted;
+	float floor;
+	{
+		std::lock_guard<std::mutex> lock(fMessageLock);
+		label = fSkipLabel;
+		highlighted = fSkipHighlighted;
+		floor = fSkipFloor;
+	}
+	if (label.Length() == 0)
+		return;
+
+	// In place whether the full screen controller comes or goes: moving
+	// would take the button away from a pointer on its way to it.
+	BRect video = VideoFrame();
+	int inset = 0;
+	if (floor >= 0 && floor <= video.bottom)
+		inset = (int)(video.bottom - floor + 1);
+
+	if (label != fSkipOverlayLabel || highlighted != fSkipOverlayHighlighted
+		|| width != fSkipOverlayWidth || height != fSkipOverlayHeight
+		|| inset != fSkipOverlayInset) {
+		fSkipOverlayLabel = label;
+		fSkipOverlayHighlighted = highlighted;
+		fSkipOverlayWidth = width;
+		fSkipOverlayHeight = height;
+		fSkipOverlayInset = inset;
+		fSkipOverlay = Overlay();
+		float density = width / (video.Width() + 1);
+		if (!fSubtitles.RenderButton(label.String(), highlighted, width,
+				height, density, inset, fSkipOverlay)) {
+			fSkipOverlay = Overlay();
+		}
+	}
+	const Overlay& overlay = fSkipOverlay;
+	if (overlay.width <= 0)
+		return;
+	SubtitleRenderer::Blend(overlay, bits, bytesPerRow, width, height);
+
+	// Where that is in the view, for the mouse: the picture may be made at
+	// the frame buffer's density.
+	float scaleX = (video.Width() + 1) / width;
+	float scaleY = (video.Height() + 1) / height;
+	BRect frame(video.left + overlay.x * scaleX,
+		video.top + overlay.y * scaleY,
+		video.left + (overlay.x + overlay.width) * scaleX - 1,
+		video.top + (overlay.y + overlay.height) * scaleY - 1);
+	std::lock_guard<std::mutex> lock(fMessageLock);
+	if (fSkipLabel == label)
+		fSkipFrame = frame;
 }
 
 
@@ -264,6 +377,7 @@ VideoView::_Compose(const VideoFramePtr& frame, int index, int width,
 		for (const Overlay& overlay : overlays)
 			SubtitleRenderer::Blend(overlay, bits, bytesPerRow, width, height);
 	}
+	_ComposeSkipButton(bits, bytesPerRow, width, height);
 
 	BString message;
 	bigtime_t until;
@@ -548,8 +662,10 @@ VideoView::_RenderDirect(const VideoFramePtr& frame, BRect rect, int width,
 	}
 	{
 		std::lock_guard<std::mutex> lock(fMessageLock);
-		if (fMessage.Length() > 0 && system_time() < fMessageUntil)
+		if ((fMessage.Length() > 0 && system_time() < fMessageUntil)
+			|| fSkipLabel.Length() > 0) {
 			return false;
+		}
 	}
 
 	std::lock_guard<std::timed_mutex> lock(fDirectLock);
@@ -803,6 +919,15 @@ VideoView::MouseDown(BPoint where)
 	}
 	if (fAudioOnly)
 		return;
+	bigtime_t now = system_time();
+	if (_InSkipButton(where)) {
+		fSkipClicked = now;
+		_Post(kMsgSkipSegment);
+		return;
+	}
+	// The second click of a double click on the button, which has gone.
+	if (clicks >= 2 && now - fSkipClicked < 800000)
+		return;
 	BMessage message(kMsgVideoClicked);
 	message.AddInt32("clicks", clicks);
 	fTarget.SendMessage(&message);
@@ -820,6 +945,19 @@ VideoView::MouseMoved(BPoint where, uint32 transit,
 		fTarget.SendMessage(&message);
 	}
 	fLastMouse = where;
+
+	bool over = transit != B_EXITED_VIEW && transit != B_OUTSIDE_VIEW
+		&& _InSkipButton(where);
+	bool changed = false;
+	{
+		std::lock_guard<std::mutex> lock(fMessageLock);
+		if (fSkipLabel.Length() > 0 && over != fSkipHighlighted) {
+			fSkipHighlighted = over;
+			changed = true;
+		}
+	}
+	if (changed)
+		Refresh();
 }
 
 

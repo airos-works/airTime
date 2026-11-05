@@ -40,6 +40,12 @@ public:
 									const char* detail);
 			void				SetSubtitleScale(float scale);
 			void				ShowMessage(const char* text);
+			// A button over the picture's bottom right corner ("Skip
+			// Intro"); clicking it sends kMsgSkipSegment. NULL or "" hides it.
+			void				SetSkipButton(const char* label);
+			// The button stays above this line (the full screen controller's
+			// top, whether it is shown or not); -1 for none.
+			void				SetSkipButtonFloor(float top);
 			// Draw the last picture again (subtitles or size changed).
 			void				Refresh();
 			void				SetFullScreen(bool fullScreen);
@@ -85,6 +91,11 @@ private:
 			void				_DrawEmpty(BRect updateRect);
 			void				_DrawAudioOnly(BRect updateRect);
 			void				_Post(uint32 what);
+			bool				_SkipButtonShown();
+			bool				_InSkipButton(BPoint where);
+			void				_ComposeSkipButton(uint8* bits,
+									int32 bytesPerRow, int width,
+									int height);
 
 			BMessenger			fTarget;
 			Player*				fPlayer;
@@ -103,6 +114,20 @@ private:
 			std::mutex			fMessageLock;
 			BString				fMessage;
 			bigtime_t			fMessageUntil;
+
+			// The skip button, guarded by fMessageLock; its overlay is made
+			// with fRenderLock held.
+			BString				fSkipLabel;
+			bool				fSkipHighlighted;
+			BRect				fSkipFrame;		// in view coordinates
+			bigtime_t			fSkipClicked;
+			Overlay				fSkipOverlay;
+			BString				fSkipOverlayLabel;
+			bool				fSkipOverlayHighlighted;
+			int					fSkipOverlayWidth;
+			int					fSkipOverlayHeight;
+			int					fSkipOverlayInset;
+			float				fSkipFloor;
 
 			bool				fAudioOnly;
 			bool				fFullScreen;

@@ -37,6 +37,7 @@ Settings::Settings()
 	snapToAspect(true),
 	devicePixels(true),
 	autoPlay(true),
+	skipLookup(true),
 	timeDisplay(0),
 	inspectorFrame(0, 0, -1, -1)
 {
@@ -72,6 +73,8 @@ Settings::Load()
 	message.FindBool("snap to aspect", &snapToAspect);
 	message.FindBool("device pixels", &devicePixels);
 	message.FindBool("auto play", &autoPlay);
+	// Find*() zeroes what it does not find: new settings need a default.
+	skipLookup = message.GetBool("skip lookup", true);
 	message.FindInt32("time display", &timeDisplay);
 	message.FindString("audio language", &audioLanguage);
 	message.FindString("subtitle language", &subtitleLanguage);
@@ -95,6 +98,7 @@ Settings::Save() const
 	message.AddBool("snap to aspect", snapToAspect);
 	message.AddBool("device pixels", devicePixels);
 	message.AddBool("auto play", autoPlay);
+	message.AddBool("skip lookup", skipLookup);
 	message.AddInt32("time display", timeDisplay);
 	message.AddString("audio language", audioLanguage);
 	message.AddString("subtitle language", subtitleLanguage);

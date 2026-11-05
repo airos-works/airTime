@@ -11,6 +11,7 @@
 #include <Messenger.h>
 
 #include "Player.h"
+#include "SkipSegments.h"
 
 
 class BFilePanel;
@@ -95,6 +96,9 @@ private:
 			void				_GoToChapter(int step);
 			void				_ApplyPreferences();
 			bool				_HandleScripting(BMessage* message);
+			void				_LookUpSkipSegments();
+			void				_UpdateSkipButton();
+			void				_Skip();
 
 			Player*				fPlayer;
 			entry_ref			fRef;
@@ -146,6 +150,13 @@ private:
 			BMessenger			fInspector;
 			BFilePanel*			fSubtitlePanel;
 			bool				fWasPlayingBeforeEnd;
+
+			// When the intro and credits are (web lookup, kMsgSkipSegmentsFound)
+			// and which of them the button offers to skip now.
+			SkipSegments		fSkipSegments;
+			int32				fSkipGeneration;
+			SkipKind			fSkipShown;
+			bigtime_t			fSkipTarget;
 };
 
 }	// namespace airtime

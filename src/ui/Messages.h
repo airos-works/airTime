@@ -34,6 +34,10 @@ enum {
 	kMsgSlower				= 'slow',
 	kMsgToggleLoop			= 'loop',
 	kMsgJKL					= 'jkl ',	// int32 "key": -1 J, 0 K, 1 L
+	kMsgSkipSegment			= 'skip',	// the Skip Intro / Credits button
+	kMsgSkipSegmentsFound	= 'skpf',	// int32 "generation", int64 "intro",
+										// "credits" (start, end pairs)
+	kMsgToggleSkipLookup	= 'tskp',
 
 	// Sound
 	kMsgSetVolume			= 'volm',	// float "volume", bool "final"

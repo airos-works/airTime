@@ -412,6 +412,125 @@ SubtitleRenderer::RenderMessage(const char* text, int width, int height,
 }
 
 
+bool
+SubtitleRenderer::RenderButton(const char* text, bool highlighted, int width,
+	int height, float density, int bottomInset, Overlay& overlay)
+{
+	if (density <= 0)
+		density = 1;
+	float viewHeight = height / density;
+	float fontSize = std::min(32.0f, std::max(12.0f, viewHeight * 0.024f))
+		* density;
+	BFont font(be_bold_font);
+	font.SetSize(fontSize);
+	font.SetFlags(B_FORCE_ANTIALIASING);
+	font_height metrics;
+	font.GetHeight(&metrics);
+	float textWidth = font.StringWidth(text);
+	float padX = ceilf(fontSize * 1.1f);
+	float padY = ceilf(fontSize * 0.6f);
+	int blockWidth = (int)ceilf(textWidth + padX * 2);
+	int blockHeight = (int)ceilf(metrics.ascent + metrics.descent + padY * 2);
+	if (blockWidth > width || blockHeight > height
+		|| !_EnsureCanvas(blockWidth, blockHeight)) {
+		return false;
+	}
+
+	BRect block(0, 0, blockWidth - 1, blockHeight - 1);
+	float radius = std::max(3.0f, blockHeight * 0.18f);
+	float border = std::max(1.0f, roundf(fontSize * 0.09f));
+	size_t count = (size_t)blockWidth * blockHeight;
+	std::vector<uint8> shape(count), ring(count), glyphs(count);
+	int32 canvasStride = fCanvas->BytesPerRow();
+	auto readChannel = [&](std::vector<uint8>& target) {
+		const uint8* bits = (const uint8*)fCanvas->Bits();
+		for (int y = 0; y < blockHeight; y++) {
+			const uint8* row = bits + y * canvasStride;
+			uint8* out = target.data() + (size_t)y * blockWidth;
+			for (int x = 0; x < blockWidth; x++)
+				out[x] = row[x * 4 + 1];
+		}
+	};
+
+	// Coverage of the shape, its edge and the text, white on black.
+	if (!fCanvas->Lock())
+		return false;
+	fCanvasView->SetDrawingMode(B_OP_OVER);
+	fCanvasView->SetLowColor(0, 0, 0);
+	fCanvasView->SetHighColor(0, 0, 0);
+	fCanvasView->FillRect(block);
+	fCanvasView->SetHighColor(255, 255, 255);
+	fCanvasView->FillRoundRect(block, radius, radius);
+	fCanvasView->Sync();
+	readChannel(shape);
+
+	fCanvasView->SetHighColor(0, 0, 0);
+	fCanvasView->FillRect(block);
+	fCanvasView->SetHighColor(255, 255, 255);
+	fCanvasView->SetPenSize(border);
+	BRect edge = block.InsetByCopy(border / 2, border / 2);
+	fCanvasView->StrokeRoundRect(edge, radius - border / 2,
+		radius - border / 2);
+	fCanvasView->SetPenSize(1);
+	fCanvasView->Sync();
+	readChannel(ring);
+
+	fCanvasView->SetHighColor(0, 0, 0);
+	fCanvasView->FillRect(block);
+	fCanvasView->SetHighColor(255, 255, 255);
+	fCanvasView->SetFont(&font);
+	fCanvasView->DrawString(text, BPoint(roundf((blockWidth - textWidth) / 2),
+		padY + metrics.ascent));
+	fCanvasView->Sync();
+	readChannel(glyphs);
+	fCanvas->Unlock();
+
+	// A dark translucent button with a light edge; under the pointer, a
+	// light one with dark text.
+	struct Layer { float red, green, blue, alpha; };
+	Layer fill = highlighted ? Layer{240, 240, 240, 0.95f}
+		: Layer{20, 20, 20, 0.72f};
+	Layer line = highlighted ? Layer{255, 255, 255, 1.0f}
+		: Layer{235, 235, 235, 0.85f};
+	Layer ink = highlighted ? Layer{16, 16, 16, 1.0f}
+		: Layer{255, 255, 255, 1.0f};
+
+	overlay.width = blockWidth;
+	overlay.height = blockHeight;
+	overlay.pixels.resize(count);
+	for (size_t i = 0; i < count; i++) {
+		float inside = shape[i] / 255.0f;
+		float alpha = inside * fill.alpha;
+		float red = fill.red, green = fill.green, blue = fill.blue;
+		auto over = [&](const Layer& layer, float coverage) {
+			float a = std::min(coverage, inside) * layer.alpha;
+			if (a <= 0)
+				return;
+			float out = a + alpha * (1 - a);
+			red = (layer.red * a + red * alpha * (1 - a)) / out;
+			green = (layer.green * a + green * alpha * (1 - a)) / out;
+			blue = (layer.blue * a + blue * alpha * (1 - a)) / out;
+			alpha = out;
+		};
+		over(line, ring[i] / 255.0f);
+		over(ink, glyphs[i] / 255.0f);
+		uint32 a = (uint32)(alpha * 255 + 0.5f);
+		overlay.pixels[i] = a == 0 ? 0 : (a << 24)
+			| ((uint32)(red + 0.5f) << 16) | ((uint32)(green + 0.5f) << 8)
+			| (uint32)(blue + 0.5f);
+	}
+
+	int margin = std::max((int)(8 * density),
+		(int)(std::min(width, height) * 0.04f));
+	overlay.x = width - margin - blockWidth;
+	overlay.y = height - margin - (int)(std::max(0, bottomInset) * density)
+		- blockHeight;
+	if (overlay.y < 0)
+		overlay.y = 0;
+	return true;
+}
+
+
 /*static*/ void
 SubtitleRenderer::Blend(const Overlay& overlay, uint8* bits, int32 bytesPerRow,
 	int width, int height, uint8 opacity)

@@ -23,6 +23,7 @@ CPPFLAGS += -Isrc -Isrc/engine -Isrc/ui \
 	-I$(HAIKU_HEADERS)/private/media \
 	-I$(HAIKU_HEADERS)/private/shared \
 	-I$(HAIKU_HEADERS)/private/interface \
+	-I$(HAIKU_HEADERS)/private/netservices \
 	$(FFMPEG_CFLAGS) $(CROSS_CPPFLAGS)
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++17 -Wall -Wextra -Wno-multichar -Wno-unused-parameter \
@@ -32,6 +33,8 @@ ENGINE_SRC = $(wildcard src/engine/*.cpp)
 UI_SRC = $(wildcard src/ui/*.cpp) $(wildcard src/*.cpp)
 APP_OBJ = $(ENGINE_SRC:%.cpp=$(BUILD)/%.o) $(UI_SRC:%.cpp=$(BUILD)/%.o)
 APP_LIBS = -lbe -lgame -lmedia -ltracker -ltranslation -llocalestub $(FFMPEG_LIBS)
+# The intro and credits lookup (src/SkipLookup.cpp): Haiku's HTTP client.
+NET_LIBS = -lnetservices -lshared -lbnetapi
 
 # The Quick Look add-on (src/quicklook): the engine and the video view built
 # again as position independent code, for the quick_look_server to load.
@@ -68,7 +71,8 @@ $(BUILD)/quicklook/%.o: %.cpp
 engine: $(ENGINE_SRC:%.cpp=$(BUILD)/%.o)
 
 $(BUILD)/airTime: $(APP_OBJ) resources/airTime.rdef resources/branding/airtime-icon.hvif
-	$(CXX) $(APP_LDFLAGS) -pthread -o $@.new $(APP_OBJ) $(FFMPEG_LDFLAGS) $(APP_LIBS) $(APP_LDEND)
+	$(CXX) $(APP_LDFLAGS) -pthread -o $@.new $(APP_OBJ) $(FFMPEG_LDFLAGS) $(NET_LIBS) \
+		$(APP_LIBS) $(APP_LDEND)
 	$(RC) -o $(BUILD)/airTime.rsrc resources/airTime.rdef
 	$(XRES) -o $@.new $(BUILD)/airTime.rsrc
 	$(MIMESET) -f $@.new
@@ -90,6 +94,7 @@ HOST_FFMPEG_CFLAGS ?= $(shell pkg-config --cflags libavformat libavcodec libavut
 HOST_FFMPEG_LIBS ?= $(shell pkg-config --libs libavformat libavcodec libavutil libswscale 2>/dev/null \
 	|| echo -l:libavformat.so.60 -l:libavcodec.so.60 -l:libavutil.so.58 -l:libswscale.so.7)
 TEST_SRC = tests/EngineTests.cpp src/engine/Tracks.cpp src/engine/Languages.cpp \
+	src/engine/SkipSegments.cpp \
 	src/engine/Bitstream.cpp src/engine/Subtitles.cpp src/ui/YuvScaler.cpp
 $(HOST_BUILD)/engine_tests: $(TEST_SRC) $(wildcard tests/host/*.h) $(wildcard src/engine/*.h) \
 		src/ui/YuvScaler.h

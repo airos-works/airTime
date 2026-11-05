@@ -21,6 +21,7 @@
 #include "Bitstream.h"
 #include "Clock.h"
 #include "PacketQueue.h"
+#include "SkipSegments.h"
 #include "Subtitles.h"
 #include "Tracks.h"
 #include "VideoDecoder.h"
@@ -154,6 +155,8 @@ public:
 			BString				Path() const { return fPath; }
 			BString				FormatName() const;
 			BString				Metadata(const char* key) const;
+			// The container's own tags, names in lower case.
+			TagMap				Tags() const;
 			int64				FileSize() const { return fFileSize; }
 			int64				BitRate() const;
 			PlayerStats			Stats();

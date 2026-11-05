@@ -54,6 +54,14 @@ public:
 			// A short message in a corner ("Subtitles: English").
 			bool				RenderMessage(const char* text, int width,
 									int height, Overlay& overlay);
+			// A button in the bottom right corner ("Skip Intro"), above
+			// bottomInset rows. density: picture pixels to a view's, so that
+			// the button keeps its size on screen whether the picture is made
+			// at the screen's density or not; the inset is in view rows.
+			bool				RenderButton(const char* text,
+									bool highlighted, int width, int height,
+									float density, int bottomInset,
+									Overlay& overlay);
 
 	static	void				Blend(const Overlay& overlay, uint8* bits,
 									int32 bytesPerRow, int width, int height,

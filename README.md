@@ -152,6 +152,19 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
   (Playback ▸ Go to Time…, ⌘G), by chapter, or a frame at a time.
 * **Full screen** (⌘F, F, or a double click) on the monitor the window is on,
   with a floating controller that hides when the mouse rests.
+* **Skip Intro and Skip Credits**: for a television episode, a button in the
+  picture's bottom right corner (in the window and in full screen) jumps past
+  the opening titles while they play, and past the end credits to the end of
+  the episode. The episode is recognised from its tags (iTunes `show`,
+  `season_number`, `episode_sort`) or its name and folders
+  (`Show.Name.S01E02.mkv`, `Show Name - 1x02.mp4`,
+  `Show Name/Season 1/02 - Title.mkv`); the series is looked up on
+  [TVmaze](https://www.tvmaze.com/api) by name, and the times come from
+  [TheIntroDB](https://theintrodb.org/) and [IntroDB](https://introdb.app/),
+  whichever has more submissions behind them. Films, and episodes neither
+  database has times for, play without the button. Only the series name, the
+  season and episode numbers and the file's length leave the computer;
+  Playback ▸ Offer to Skip Intros and Credits turns the lookup off.
 * Opens what Tracker opens: once installed, double-clicking a film or a song
   plays it in airTime.
 * **Quick Look**: on air/OS, the space bar in Tracker plays a film (or a
@@ -184,7 +197,7 @@ Install with `pkgman install <file>`, or copy the file into `/boot/system/packag
 src/engine/   playback: demuxing, decoding, clocks, subtitles, captions
 src/ui/       the window, the controller, the video view
 src/quicklook/ the Quick Look add-on: the engine and the video view in Tracker's panel
-src/          the application and its settings
+src/          the application, its settings and the intro and credits lookup
 tests/        host-side tests of the engine (make check-host)
 tools/        building, packaging, the icon, test material
 ```
@@ -253,7 +266,9 @@ Without them, everything plays in software.
 
 * `make check-host` runs the engine tests on Linux (time and language
   helpers, ASS markup, subtitle files in other encodings, SPS parsing,
-  caption extraction and decoding, the ten-bit scaler against swscale) and
+  caption extraction and decoding, the ten-bit scaler against swscale,
+  recognising episodes from file names and reading the intro databases'
+  answers) and
   the renderer test (a synthetic HDR10 picture through the scaler and tone
   mapping against the same arithmetic in double precision, timed against
   swscale's path). Both also build for arm64, to try the NEON code on the
@@ -265,7 +280,9 @@ Without them, everything plays in software.
 * The player answers to scripting, which the lab tools use: for example
   `hey airTime get Stats of Window 0`, `set Position of Window 0 to 60000000`,
   `set Rate of Window 0 to 8`, `get SubtitleText of Window 0`,
-  `get Decoder of Window 0`.
+  `get Decoder of Window 0`, `get SkipSegments of Window 0` (the intro and
+  credits times found), `get Skip of Window 0` (what the button offers now)
+  and `do Skip of Window 0` (press it).
 
 ## Licence
 

@@ -36,6 +36,7 @@
 #include "Look.h"
 #include "Screens.h"
 #include "Settings.h"
+#include "SkipLookup.h"
 #include "VideoView.h"
 
 
@@ -156,6 +157,12 @@ static property_info sProperties[] = {
 		"Whether the movie starts over at its end.", 0, {B_BOOL_TYPE}},
 	{"Frame", {B_GET_PROPERTY, B_SET_PROPERTY, 0}, {B_DIRECT_SPECIFIER, 0},
 		"The window's frame on the screen.", 0, {B_RECT_TYPE}},
+	{"Skip", {B_GET_PROPERTY, B_EXECUTE_PROPERTY, 0}, {B_DIRECT_SPECIFIER, 0},
+		"What the skip button offers now (\"Skip Intro\", \"Skip Credits\" "
+		"or \"\"); execute it to press the button.", 0, {B_STRING_TYPE}},
+	{"SkipSegments", {B_GET_PROPERTY, 0}, {B_DIRECT_SPECIFIER, 0},
+		"The intro and credits times found for the episode.", 0,
+		{B_STRING_TYPE}},
 	{0}
 };
 
@@ -188,7 +195,10 @@ PlayerWindow::PlayerWindow(BRect frame)
 	fScrubbing(false),
 	fScrubWasPlaying(false),
 	fSubtitlePanel(NULL),
-	fWasPlayingBeforeEnd(false)
+	fWasPlayingBeforeEnd(false),
+	fSkipGeneration(0),
+	fSkipShown(kSkipNone),
+	fSkipTarget(0)
 {
 	fPlayer = new Player(BMessenger(this));
 	fPlayer->SetHardwareDecoding(settings().hardwareDecoding
@@ -272,6 +282,10 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 	fPlayer->SetVideoSink(NULL);
 	fPlayer->Close();
 	fVideo->SetPlayer(NULL);
+	// What a lookup for the file before finds is for that one.
+	fSkipGeneration++;
+	fSkipSegments = SkipSegments();
+	_UpdateSkipButton();
 
 	fPlayer->SetPreferredLanguages(settings().audioLanguage.String(),
 		settings().subtitleLanguage.String());
@@ -355,7 +369,73 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 	if (play)
 		fPlayer->Play();
 	_UpdateControls();
+	_LookUpSkipSegments();
 	return B_OK;
+}
+
+
+// #pragma mark - skipping intros and credits
+
+
+/*!	A television episode's intro and credits times, from the web: the
+	answer comes as kMsgSkipSegmentsFound. */
+void
+PlayerWindow::_LookUpSkipSegments()
+{
+	if (!fHasFile || !settings().skipLookup || !fPlayer->HasMovingVideo())
+		return;
+	BPath path(&fRef);
+	if (path.InitCheck() != B_OK)
+		return;
+	EpisodeInfo episode = identify_episode(path.Path(), fPlayer->Tags());
+	if (!episode.IsEpisode())
+		return;
+	if (getenv("AIRTIME_TRACE") != NULL) {
+		fprintf(stderr, "airTime: looking up \"%s\"%s season %d episode %d\n",
+			episode.show.c_str(), episode.year > 0
+				? BString().SetToFormat(" (%d)", episode.year).String() : "",
+			episode.season, episode.episode);
+	}
+	start_skip_lookup(episode, fPlayer->Duration(), BMessenger(this),
+		fSkipGeneration);
+}
+
+
+void
+PlayerWindow::_UpdateSkipButton()
+{
+	SkipKind kind = kSkipNone;
+	bigtime_t target = 0;
+	if (fHasFile && !fSkipSegments.Empty() && !fScrubbing
+		&& !fPlayer->IsScanning()) {
+		int64_t found = 0;
+		kind = active_skip(fSkipSegments, fPlayer->Position(),
+			fPlayer->Duration(), &found);
+		target = found;
+	}
+	fSkipTarget = target;
+	if (kind == fSkipShown)
+		return;
+	fSkipShown = kind;
+	fVideo->SetSkipButton(kind == kSkipIntro ? "Skip Intro"
+		: kind == kSkipCredits ? "Skip Credits" : NULL);
+}
+
+
+void
+PlayerWindow::_Skip()
+{
+	if (!fHasFile || fSkipShown == kSkipNone)
+		return;
+	bigtime_t duration = fPlayer->Duration();
+	if (fSkipTarget >= duration - 500000) {
+		// Credits to the end: the film is over, as it is when it plays out.
+		fPlayer->Seek(duration, true);
+	} else
+		fPlayer->Seek(fSkipTarget, true);
+	fSkipShown = kSkipNone;
+	fVideo->SetSkipButton(NULL);
+	_UpdateControls();
 }
 
 
@@ -450,6 +530,8 @@ PlayerWindow::_BuildMenus()
 	fPlaybackMenu->AddItem(fSpeedMenu);
 	fPlaybackMenu->AddSeparatorItem();
 	fPlaybackMenu->AddItem(item("Loop", kMsgToggleLoop, 'L'));
+	fPlaybackMenu->AddItem(item("Offer to Skip Intros and Credits",
+		kMsgToggleSkipLookup));
 	fMenuBar->AddItem(fPlaybackMenu);
 
 	fAudioMenu = new BMenu("Audio");
@@ -637,6 +719,11 @@ PlayerWindow::_UpdateMenus()
 			menuItem->SetEnabled(open);
 			if (message->what == kMsgToggleLoop)
 				menuItem->SetMarked(fPlayer->IsLooping());
+			if (message->what == kMsgToggleSkipLookup) {
+				// A preference: there whether a film is open or not.
+				menuItem->SetEnabled(true);
+				menuItem->SetMarked(settings().skipLookup);
+			}
 			if (message->what == kMsgStepForward
 				|| message->what == kMsgStepBackward) {
 				menuItem->SetEnabled(video);
@@ -784,9 +871,11 @@ PlayerWindow::_Layout()
 		fHud->ResizeTo(hudWidth, hudHeight);
 		fHud->MoveTo(floorf((video.Width() - hudWidth) / 2),
 			video.bottom - hudHeight - 36);
+		fVideo->SetSkipButtonFloor(fHud->Frame().top);
 		fVideo->UpdateWindowOrigin();
 		return;
 	}
+	fVideo->SetSkipButtonFloor(-1);
 
 	float controlsHeight = _ControlsHeight();
 	fControls->MoveTo(0, surface.bottom - controlsHeight + 1);
@@ -1130,6 +1219,8 @@ PlayerWindow::_Pulse()
 			_SnapToAspect();
 		}
 	}
+
+	_UpdateSkipButton();
 
 	if (fInspector.IsValid() && fPulseCount % 5 == 0)
 		_UpdateInspector();
@@ -1826,6 +1917,22 @@ PlayerWindow::MessageReceived(BMessage* message)
 		case kMsgVideoClicked:
 			_HandleClick(message->GetInt32("clicks", 1));
 			break;
+		case kMsgSkipSegment:
+			_Skip();
+			break;
+		case kMsgSkipSegmentsFound:
+			if (message->GetInt32("generation", -1) == fSkipGeneration) {
+				fSkipSegments = find_skip_segments(*message);
+				_UpdateSkipButton();
+			}
+			break;
+		case kMsgToggleSkipLookup:
+			settings().skipLookup = !settings().skipLookup;
+			fSkipGeneration++;
+			fSkipSegments = SkipSegments();
+			_UpdateSkipButton();
+			_LookUpSkipSegments();
+			break;
 		case 'ctxm':
 		{
 			BPoint where;
@@ -1906,6 +2013,7 @@ PlayerWindow::MessageReceived(BMessage* message)
 
 		case B_GET_PROPERTY:
 		case B_SET_PROPERTY:
+		case B_EXECUTE_PROPERTY:
 			if (!_HandleScripting(message))
 				BWindow::MessageReceived(message);
 			break;
@@ -2214,6 +2322,27 @@ PlayerWindow::_HandleScripting(BMessage* message)
 				ResizeTo(frame.Width(), frame.Height());
 			}
 		}
+	} else if (name == "Skip") {
+		if (get) {
+			reply.AddString("result", fSkipShown == kSkipIntro ? "Skip Intro"
+				: fSkipShown == kSkipCredits ? "Skip Credits" : "");
+		} else if (fSkipShown != kSkipNone)
+			_Skip();
+		else
+			status = B_NOT_ALLOWED;
+	} else if (name == "SkipSegments") {
+		BString text;
+		for (const SkipSegment& segment : fSkipSegments.intros) {
+			text << BString().SetToFormat("intro %s-%s; ",
+				format_time(segment.start, true).String(),
+				segment.end < 0 ? "end" : format_time(segment.end, true).String());
+		}
+		for (const SkipSegment& segment : fSkipSegments.credits) {
+			text << BString().SetToFormat("credits %s-%s; ",
+				format_time(segment.start, true).String(),
+				segment.end < 0 ? "end" : format_time(segment.end, true).String());
+		}
+		reply.AddString("result", text);
 	} else if (name == "Loop") {
 		if (get)
 			reply.AddBool("result", fPlayer->IsLooping());

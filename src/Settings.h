@@ -25,6 +25,8 @@ struct Settings {
 	// the app_server allows it (B_DIRECT_DEVICE_PIXELS).
 	bool		devicePixels;
 	bool		autoPlay;
+	// Look up when TV episodes' intros and credits are, on the web.
+	bool		skipLookup;
 	int32		timeDisplay;
 	BString		audioLanguage;		// "" = the file's default
 	BString		subtitleLanguage;	// "" = off unless forced

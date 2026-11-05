@@ -21,6 +21,7 @@
 
 #include "Bitstream.h"
 #include "Languages.h"
+#include "SkipSegments.h"
 #include "Subtitles.h"
 #include "Tracks.h"
 #include "YuvScaler.h"
@@ -554,11 +555,134 @@ test_scaler()
 }
 
 
+static void
+test_skip_segments()
+{
+	TagMap none;
+	EpisodeInfo info = identify_episode(
+		"/Videos/TV/Breaking.Bad.S01E02.720p.BluRay.x264.mkv", none);
+	CHECK(info.IsEpisode());
+	CHECK_EQUAL_STRING(info.show, "Breaking Bad");
+	CHECK(info.season == 1 && info.episode == 2);
+
+	info = identify_episode("/m/The Office (US) - 2x05 - Halloween.mp4", none);
+	CHECK_EQUAL_STRING(info.show, "The Office (US)");
+	CHECK(info.season == 2 && info.episode == 5);
+
+	info = identify_episode("/m/Doctor Who (2005)/Season 01/"
+		"Doctor Who (2005) - S01E03 - The Unquiet Dead.mkv", none);
+	CHECK_EQUAL_STRING(info.show, "Doctor Who");
+	CHECK(info.year == 2005);
+	CHECK(info.season == 1 && info.episode == 3);
+
+	info = identify_episode("/m/Severance/Season 2/04 - Woe's Hollow.mkv",
+		none);
+	CHECK_EQUAL_STRING(info.show, "Severance");
+	CHECK(info.season == 2 && info.episode == 4);
+
+	info = identify_episode("/m/Severance/S02E07.mkv", none);
+	CHECK_EQUAL_STRING(info.show, "Severance");
+	CHECK(info.season == 2 && info.episode == 7);
+
+	info = identify_episode("/m/Show/Specials/Episode 3.mkv", none);
+	CHECK_EQUAL_STRING(info.show, "Show");
+	CHECK(info.season == 0 && info.episode == 3);
+
+	info = identify_episode("/m/[Group] Show_Name_s03e10_[1080p].mkv", none);
+	CHECK_EQUAL_STRING(info.show, "Show Name");
+	CHECK(info.season == 3 && info.episode == 10);
+
+	// Not episodes: films, a resolution, a bare number.
+	CHECK(!identify_episode("/m/Blade Runner (1982) 1920x1080.mkv", none)
+		.IsEpisode());
+	CHECK(!identify_episode("/m/Movies/Heat.1995.mkv", none).IsEpisode());
+	CHECK(!identify_episode("/m/Music/02 - Song.mp3", none).IsEpisode());
+
+	TagMap tags;
+	tags["show"] = "Slow Horses";
+	tags["season_number"] = "4";
+	tags["episode_sort"] = "6";
+	info = identify_episode("/m/download.m4v", tags);
+	CHECK_EQUAL_STRING(info.show, "Slow Horses");
+	CHECK(info.season == 4 && info.episode == 6);
+
+	JsonValue json;
+	CHECK(parse_json("{\"a\": [1, -2.5e1, true, null, \"x\\u00e9\\n\"],"
+		" \"b\": {}}", json));
+	CHECK(json["a"].items.size() == 5);
+	CHECK(json["a"].items[1].number == -25);
+	CHECK_EQUAL_STRING(json["a"].items[4].string, "x\xc3\xa9\n");
+	CHECK(json["missing"].IsNull());
+	CHECK(!parse_json("{\"a\": }", json));
+	CHECK(!parse_json("[1, 2", json));
+
+	EpisodeInfo search;
+	search.show = "The Office";
+	search.year = 2005;
+	CHECK(parse_tvmaze_search("[{\"score\":0.9,\"show\":{\"name\":\"The Office\","
+		"\"premiered\":\"2001-07-09\",\"externals\":{\"thetvdb\":78107,"
+		"\"imdb\":\"tt0290978\"}}},{\"score\":0.8,\"show\":{\"name\":"
+		"\"The Office\",\"premiered\":\"2005-03-24\",\"externals\":"
+		"{\"tvrage\":6061,\"thetvdb\":73244,\"imdb\":\"tt0386676\"}}}]",
+		search));
+	CHECK_EQUAL_STRING(search.imdbId, "tt0386676");
+	CHECK(search.tvdbId == 73244);
+	CHECK(!parse_tvmaze_search("[]", search));
+
+	SkipSegments introDB = parse_introdb("{\"imdb_id\":\"tt0903747\","
+		"\"intro\":{\"start_sec\":314.5,\"end_sec\":331,\"start_ms\":314500,"
+		"\"end_ms\":331000,\"confidence\":1,\"submission_count\":5},"
+		"\"recap\":null,\"outro\":{\"start_ms\":2843000,\"end_ms\":2901000,"
+		"\"submission_count\":1},\"post_credits\":null}");
+	CHECK(introDB.intros.size() == 1 && introDB.introVotes == 5);
+	CHECK(introDB.intros[0].start == 314500000
+		&& introDB.intros[0].end == 331000000);
+	CHECK(introDB.credits.size() == 1 && introDB.credits[0].end == 2901000000);
+
+	SkipSegments theIntroDB = parse_theintrodb("{\"tvdb_id\":81189,"
+		"\"type\":\"tv\",\"season\":1,\"episode\":2,\"intro\":[{\"start_ms\":"
+		"null,\"end_ms\":23000,\"submission_count\":2}],\"credits\":"
+		"[{\"start_ms\":2847619,\"end_ms\":null,\"submission_count\":3}]}");
+	CHECK(theIntroDB.intros.size() == 1 && theIntroDB.intros[0].start == 0
+		&& theIntroDB.intros[0].end == 23000000);
+	CHECK(theIntroDB.credits.size() == 1
+		&& theIntroDB.credits[0].start == 2847619000
+		&& theIntroDB.credits[0].end == -1);
+	CHECK(parse_theintrodb("{\"error\":\"no submissions\"}").Empty());
+	CHECK(parse_introdb("not json").Empty());
+
+	// The intro from IntroDB (5 votes against 2), the credits from
+	// TheIntroDB (3 against 1).
+	SkipSegments merged = merge_skip_segments(theIntroDB, introDB);
+	CHECK(merged.intros.size() == 1 && merged.intros[0].start == 314500000);
+	CHECK(merged.credits.size() == 1 && merged.credits[0].end == -1);
+	merged = merge_skip_segments(SkipSegments(), introDB);
+	CHECK(merged.credits.size() == 1 && merged.credits[0].start == 2843000000);
+
+	int64_t duration = 2950000000;
+	int64_t target = 0;
+	merged = merge_skip_segments(theIntroDB, introDB);
+	CHECK(active_skip(merged, 0, duration, &target) == kSkipNone);
+	CHECK(active_skip(merged, 314500000, duration, &target) == kSkipIntro);
+	CHECK(target == 331000000);
+	CHECK(active_skip(merged, 330500000, duration, &target) == kSkipNone);
+	CHECK(active_skip(merged, 2900000000, duration, &target) == kSkipCredits);
+	CHECK(target == duration);
+	// Credits timed for a release longer than this file.
+	CHECK(active_skip(merged, 2900000000, 2800000000, &target) == kSkipNone);
+	CHECK(active_skip(SkipSegments(), 1000, duration, &target) == kSkipNone);
+
+	CHECK_EQUAL_STRING(url_encode("Grey's Anatomy & Co"),
+		"Grey%27s%20Anatomy%20%26%20Co");
+}
+
+
 int
 main()
 {
 	printf("airTime engine tests\n");
 	test_time();
+	test_skip_segments();
 	test_languages();
 	test_ass();
 	test_track();
