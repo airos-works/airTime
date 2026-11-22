@@ -66,12 +66,16 @@ struct HardwareDecoderKind {
 const HardwareDecoderKind kKinds[] = {
 	// Polaris UVD in the air/OS amdgpu driver. The add-on registers no
 	// Media Kit formats, so airTime owns selection and software fallback.
+	// The add-on (VA-API, also Intel GPUs on i915_drm) gives half-size
+	// pictures, scaled by the GPU: on a Gemini Lake Yoga 11e reading a 4K
+	// picture back and scaling it took 33 + 17 ms of a 41.7 ms frame.
+	// An older add-on gives full-size ones, which airTime takes as they come.
 	{"amduvd", "AMD UVD", {{AV_CODEC_ID_H264, 4096, 4096, 8},
-		{AV_CODEC_ID_NONE, 0, 0, 0}}, 16, false, 0},
+		{AV_CODEC_ID_NONE, 0, 0, 0}}, 16, false, 0, true},
 	// The same addon exposes Main/Main 10 at index 1, retaining P010
 	// precision for ten-bit scaling and tone mapping in the player.
 	{"amduvd", "AMD UVD", {{AV_CODEC_ID_HEVC, 4096, 4096, 10},
-		{AV_CODEC_ID_NONE, 0, 0, 0}}, 0, false, 1},
+		{AV_CODEC_ID_NONE, 0, 0, 0}}, 0, false, 1, true},
 	// The NVDEC add-on of this fork: eight bit 4:2:0 progressive H.264, and
 	// HEVC Main and Main 10 (which the add-on does not offer the Media Kit:
 	// it is only asked here, where a refusal falls back to libavcodec).
