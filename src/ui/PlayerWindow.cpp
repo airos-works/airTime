@@ -5,6 +5,12 @@
 
 
 #include "PlayerWindow.h"
+#if __has_include(<MobileKit.h>)
+#include <MobileKit.h>
+#else
+#include "compat/MobileKit.h"
+#endif
+
 
 #include <atomic>
 #include <math.h>
@@ -16,6 +22,8 @@
 #include <Application.h>
 #include <Bitmap.h>
 #include <FilePanel.h>
+#include <ListView.h>
+#include <StringView.h>
 #include <Menu.h>
 #include <MenuBar.h>
 #include <MenuItem.h>
@@ -250,6 +258,7 @@ PlayerWindow::PlayerWindow(BRect frame)
 	fHud->Hide();
 	fVideo->AddChild(fHud);
 
+	_BuildMobileView();
 	fVideo->SetPlayer(fPlayer);
 	fVideo->SetSubtitleScale(settings().subtitleScale);
 	fControls->SetVolume(settings().volume, settings().muted);
@@ -260,6 +269,7 @@ PlayerWindow::PlayerWindow(BRect frame)
 
 	_Layout();
 	_ApplySizeLimits();
+	BMobileKit::PrepareWindow(this, [this](bool mobile) { _SetMobileView(mobile); });
 
 	BMessage pulse(kMsgPulse);
 	fPulseRunner = new BMessageRunner(BMessenger(this), &pulse,
@@ -325,6 +335,8 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 		return status;
 	}
 	fRef = ref;
+	if (fMobile)
+		_ShowLibrary(false);
 	be_roster->AddToRecentDocuments(&ref, kAppSignature);
 
 	SetTitle(ref.name);
@@ -875,9 +887,142 @@ PlayerWindow::_ControlsHeight() const
 
 
 void
+PlayerWindow::_BuildMobileView()
+{
+	auto* header = new BMobileKit::Bar("mobile-header");
+	fBrowse = header->AddAction("library", "Browse", new BMessage('mLib'));
+	header->AddAction("open", "Open…", new BMessage(kMsgOpenFile));
+	header->AddAction("audio", "Audio", new BMessage(kMsgCycleAudio));
+	header->AddAction("subtitles", "Subtitles", new BMessage(kMsgCycleSubtitle));
+	fMobileHeader = header;
+	header->Hide();
+	AddChild(header);
+
+	fLibrary = new BGroupView("video-library", B_VERTICAL);
+	fLibrary->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+	fLibrary->GroupLayout()->SetInsets(B_USE_DEFAULT_SPACING);
+	fLibraryHeading = new BStringView("heading", "Recently opened");
+	fLibraryHeading->SetFont(be_bold_font);
+	fLibrary->GroupLayout()->AddView(fLibraryHeading);
+	fRecent = new BListView("recent-videos");
+	fRecent->SetSelectionMessage(new BMessage('mVid'));
+	fLibrary->GroupLayout()->AddView(BMobileKit::Scroll("library-scroll", fRecent));
+	fLibrary->Hide();
+	AddChild(fLibrary);
+	fRecent->SetTarget(this);
+
+	auto* bar = new BMobileKit::Bar("mobile-playback");
+	auto skip = [bar](const char* name, const char* label, int seconds) {
+		auto* message = new BMessage(kMsgSeekBy);
+		message->AddInt64("delta", (bigtime_t)seconds * 1000000);
+		bar->AddAction(name, label, message);
+	};
+	skip("rewind", "−10 s", -10);
+	fPlay = bar->AddAction("play", "Play", new BMessage(kMsgTogglePlay));
+	skip("forward", "+10 s", 10);
+	fTimeline = BMobileKit::Slider("timeline", "Position", new BMessage('mPos'), 0, 1000);
+	bar->GroupLayout()->AddView(fTimeline, 3);
+	fMobileControls = bar;
+	bar->Hide();
+	AddChild(bar);
+}
+
+
+void
+PlayerWindow::_ShowLibrary(bool show)
+{
+	if (show) {
+		fRecentRefs.clear();
+		while (BListItem* item = fRecent->RemoveItem((int32)0))
+			delete item;
+		BMessage refs;
+		be_roster->GetRecentDocuments(&refs, 32, NULL, kAppSignature);
+		entry_ref ref;
+		for (int32 i = 0; refs.FindRef("refs", i, &ref) == B_OK; i++) {
+			if (BEntry(&ref).Exists()) {
+				fRecentRefs.push_back(ref);
+				fRecent->AddItem(new BMobileKit::ListItem(ref.name));
+			}
+		}
+		fLibraryHeading->SetText(fRecentRefs.empty()
+			? "Open a video to start your library" : "Recently opened");
+	}
+	fBrowse->SetEnabled(fHasFile);
+	fBrowse->SetLabel(show ? "Player" : "Browse");
+	if (show == !fLibrary->IsHidden(fLibrary))
+		return;
+	if (show) {
+		fLibrary->Show();
+		fFrame->Hide();
+		fMobileControls->Hide();
+	} else {
+		fLibrary->Hide();
+		fFrame->Show();
+		fMobileControls->Show();
+	}
+}
+
+
+void
+PlayerWindow::_SetMobileView(bool mobile)
+{
+	if (fMobile == mobile)
+		return;
+	if (mobile) {
+		fDesktopFullScreen = fFullScreen;
+		if (fFullScreen) {
+			fDesktopVideoFrame = fSavedFrame;
+			_SetFullScreen(false);
+		}
+		SetFeel(B_NORMAL_WINDOW_FEEL);
+	}
+	fMobile = mobile;
+	fResizePending = false;
+	if (mobile) {
+		fControls->Hide();
+		fMenuBar->Hide();
+		fMobileHeader->Show();
+		fMobileControls->Show();
+		_ShowLibrary(!fHasFile);
+	} else {
+		_ShowLibrary(false);
+		fMobileHeader->Hide();
+		fMobileControls->Hide();
+		fMenuBar->Show();
+		fControls->Show();
+		SetFeel(fAlwaysOnTop ? B_FLOATING_ALL_WINDOW_FEEL : B_NORMAL_WINDOW_FEEL);
+		if (fDesktopFullScreen && fHasFile && fPlayer->HasMovingVideo()) {
+			_SetFullScreen(true);
+			fSavedFrame = fDesktopVideoFrame;
+		}
+	}
+	_ApplySizeLimits();
+	_Layout();
+}
+
+
+void
 PlayerWindow::_Layout()
 {
 	BRect bounds = Bounds();
+	if (fMobile) {
+		float header = ceilf(fMobileHeader->PreferredSize().height);
+		float controls = ceilf(fMobileControls->PreferredSize().height);
+		fMobileHeader->MoveTo(0, 0);
+		fMobileHeader->ResizeTo(bounds.Width(), header);
+		fLibrary->MoveTo(0, header + 1);
+		fLibrary->ResizeTo(bounds.Width(), bounds.Height() - header - 1);
+		fMobileControls->MoveTo(0, bounds.bottom - controls);
+		fMobileControls->ResizeTo(bounds.Width(), controls);
+		fFrame->MoveTo(0, header + 1);
+		fFrame->ResizeTo(bounds.Width(), fmaxf(0, bounds.Height() - header - controls - 2));
+		fFrame->SetGroove(BRect());
+		fVideo->MoveTo(0, 0);
+		fVideo->ResizeTo(fFrame->Bounds().Width(), fFrame->Bounds().Height());
+		fVideo->SetSkipButtonFloor(-1);
+		fVideo->UpdateWindowOrigin();
+		return;
+	}
 	float menuHeight = _MenuHeight();
 	fFrame->MoveTo(0, menuHeight);
 	fFrame->ResizeTo(bounds.Width(), bounds.Height() - menuHeight);
@@ -930,7 +1075,7 @@ PlayerWindow::_ApplySizeLimits()
 		minHeight = chrome + kAudioInfoHeight;
 	else
 		minHeight = chrome + kBorder + 90;
-	if (fFullScreen)
+	if (fMobile || fFullScreen)
 		SetSizeLimits(0, 100000, 0, 100000);
 	else
 		SetSizeLimits(minWidth - 1, 100000, minHeight - 1, 100000);
@@ -947,7 +1092,7 @@ PlayerWindow::_ScreenFrame() const
 void
 PlayerWindow::_ResizeToVideo(float scale)
 {
-	if (fFullScreen)
+	if (fMobile || fFullScreen)
 		return;
 	BRect screen = _ScreenFrame();
 	float chrome = _MenuHeight() + _ControlsHeight();
@@ -1015,7 +1160,7 @@ PlayerWindow::_ResizeToVideo(float scale)
 void
 PlayerWindow::_SnapToAspect()
 {
-	if (fFullScreen || !fHasFile || !fPlayer->HasMovingVideo()
+	if (fMobile || fFullScreen || !fHasFile || !fPlayer->HasMovingVideo()
 		|| !settings().snapToAspect) {
 		return;
 	}
@@ -1040,7 +1185,7 @@ PlayerWindow::FrameResized(float width, float height)
 {
 	BWindow::FrameResized(width, height);
 	_Layout();
-	if (fIgnoreResize == 0 && !fFullScreen) {
+	if (fIgnoreResize == 0 && !fMobile && !fFullScreen) {
 		fResizePending = true;
 		fResizedAt = system_time();
 	}
@@ -1069,7 +1214,7 @@ PlayerWindow::SetFullScreen(bool fullScreen)
 void
 PlayerWindow::_SetFullScreen(bool fullScreen)
 {
-	if (fullScreen == fFullScreen)
+	if (fMobile || fullScreen == fFullScreen)
 		return;
 	if (fullScreen && (!fHasFile || !fPlayer->HasMovingVideo()))
 		return;
@@ -1150,6 +1295,16 @@ PlayerWindow::_UpdateControls()
 	if (!fScrubbing) {
 		fControls->SetPosition(position, duration);
 		fHud->SetPosition(position, duration);
+	}
+	if (fMobile) {
+		const char* label = playing ? "Pause" : "Play";
+		if (strcmp(fPlay->Label(), label) != 0)
+			fPlay->SetLabel(label);
+		BPoint where;
+		uint32 buttons;
+		fTimeline->GetMouse(&where, &buttons, false);
+		if (buttons == 0 && duration > 0)
+			fTimeline->SetPosition((float)((double)position / duration));
 	}
 	fControls->SetPlaying(playing);
 	fHud->SetPlaying(playing);
@@ -1646,6 +1801,33 @@ void
 PlayerWindow::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
+		case BMobileKit::B_MOBILE_WINDOW_QUERY:
+		{
+			BMessage reply(B_REPLY);
+			reply.AddBool("primary", true);
+			message->SendReply(&reply);
+			break;
+		}
+		case BMobileKit::B_MOBILE_VIEW_CHANGED:
+			_SetMobileView(message->GetBool("mobile", false));
+			break;
+		case 'mLib':
+			_ShowLibrary(fLibrary->IsHidden(fLibrary));
+			break;
+		case 'mVid':
+		{
+			int32 index = fRecent->CurrentSelection();
+			if (index >= 0 && index < (int32)fRecentRefs.size()) {
+				BString error;
+				if (OpenFile(fRecentRefs[index], true, &error) != B_OK)
+					(new BAlert("Open video", error.String(), "OK"))->Go(NULL);
+			}
+			break;
+		}
+		case 'mPos':
+			if (fHasFile)
+				fPlayer->Seek((bigtime_t)(fTimeline->Position() * (double)fPlayer->Duration()), true);
+			break;
 		case kMsgPulse:
 			_Pulse();
 			break;
@@ -1916,7 +2098,7 @@ PlayerWindow::MessageReceived(BMessage* message)
 			break;
 		case kMsgToggleOnTop:
 			fAlwaysOnTop = !fAlwaysOnTop;
-			if (!fFullScreen) {
+			if (!fFullScreen && !fMobile) {
 				SetFeel(fAlwaysOnTop ? B_FLOATING_ALL_WINDOW_FEEL
 					: B_NORMAL_WINDOW_FEEL);
 			}

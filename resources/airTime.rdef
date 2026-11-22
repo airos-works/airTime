@@ -1,5 +1,6 @@
 resource app_signature "application/x-vnd.airOS-airTime";
 
+resource(1, "Mobile Kit") #'MOBV' $"01";
 resource app_flags B_SINGLE_LAUNCH;
 
 resource app_version {

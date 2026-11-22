@@ -14,6 +14,11 @@
 #include "SkipSegments.h"
 
 
+class BButton;
+class BGroupView;
+class BListView;
+class BSlider;
+class BStringView;
 class BFilePanel;
 class BMenu;
 class BMenuBar;
@@ -66,6 +71,9 @@ private:
 			BMenu*				_BuildSpeedMenu(const char* name);
 			void				_ShowContextMenu(BPoint where);
 
+			void				_BuildMobileView();
+			void				_SetMobileView(bool mobile);
+			void				_ShowLibrary(bool show);
 			void				_Layout();
 			float				_MenuHeight() const;
 			float				_ControlsHeight() const;
@@ -116,6 +124,19 @@ private:
 			BMenu*				fSubtitleMenu;
 			BMenu*				fSubtitleSizeMenu;
 			BMenuItem*			fPlayItem;
+
+			bool				fMobile = false;
+			bool				fDesktopFullScreen = false;
+			BRect				fDesktopVideoFrame;
+			BGroupView*			fMobileHeader;
+			BGroupView*			fMobileControls;
+			BGroupView*			fLibrary;
+			BButton*			fBrowse;
+			BButton*			fPlay;
+			BSlider*			fTimeline;
+			BListView*			fRecent;
+			BStringView*		fLibraryHeading;
+			std::vector<entry_ref> fRecentRefs;
 
 			FrameView*			fFrame;
 			VideoView*			fVideo;
