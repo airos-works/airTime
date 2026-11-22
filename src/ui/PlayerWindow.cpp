@@ -6,6 +6,7 @@
 
 #include "PlayerWindow.h"
 
+#include <atomic>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -67,6 +68,25 @@ static const float kEmptyVideoWidth = 520;
 static const float kEmptyVideoHeight = 292;
 static const bigtime_t kPulseInterval = 100000;
 static const bigtime_t kScreenSaverInterval = 20000000;
+
+
+/*!	Asks air/OS's power daemon for full performance while a film plays in
+	any window: on battery its power saving profile packs the threads onto
+	fewer, slower cores, and a 4K film on a Yoga 11e (Gemini Lake) then made
+	13 pictures a second instead of 24. The daemon forgets the request when
+	airTime quits; one that does not know the message ignores it. */
+static void
+ask_for_performance(bool wanted)
+{
+	static std::atomic<int32> sPlaying(0);
+	int32 before = wanted ? sPlaying++ : sPlaying--;
+	if ((wanted && before != 0) || (!wanted && before != 1))
+		return;
+	BMessage request('pwPR');
+	request.AddBool("performance", wanted);
+	BMessenger("application/x-vnd.Haiku-powermanagement")
+		.SendMessage(&request, (BHandler*)NULL, 500000);
+}
 static const bigtime_t kHudTimeout = 2800000;
 
 static const double kSpeeds[] = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0};
@@ -180,6 +200,7 @@ PlayerWindow::PlayerWindow(BRect frame)
 	fHudShown(false),
 	fLastActivity(0),
 	fScreenSaverKicked(0),
+	fAskedForPerformance(false),
 	fCreated(system_time()),
 	fDaemonKilled(false),
 	fAlwaysOnTop(false),
@@ -249,6 +270,8 @@ PlayerWindow::PlayerWindow(BRect frame)
 PlayerWindow::~PlayerWindow()
 {
 	delete fPulseRunner;
+	if (fAskedForPerformance)
+		ask_for_performance(false);
 	// Stop every thread before the views they draw into go away.
 	fPlayer->SetVideoSink(NULL);
 	fPlayer->Close();
@@ -1163,6 +1186,13 @@ PlayerWindow::_Pulse()
 		fDaemonKilled = true;
 		fprintf(stderr, "airTime: ending the direct daemon for a test\n");
 		kill_direct_daemon(this);
+	}
+
+	bool playing = fHasFile && fPlayer->IsPlaying() && fPlayer->HasMovingVideo()
+		&& getenv("AIRTIME_NO_PERFORMANCE_REQUEST") == NULL;
+	if (playing != fAskedForPerformance) {
+		fAskedForPerformance = playing;
+		ask_for_performance(playing);
 	}
 
 	// No screen saver while a film plays where it can be seen: putting the

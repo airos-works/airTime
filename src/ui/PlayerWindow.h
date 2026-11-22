@@ -129,6 +129,7 @@ private:
 			bool				fHudShown;
 			bigtime_t			fLastActivity;
 			bigtime_t			fScreenSaverKicked;
+			bool				fAskedForPerformance;
 			bigtime_t			fCreated;
 			bool				fDaemonKilled;
 			bool				fAlwaysOnTop;
