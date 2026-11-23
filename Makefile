@@ -45,7 +45,8 @@ QUICKLOOK_CPPFLAGS ?=
 QUICKLOOK_LDFLAGS ?=
 QUICKLOOK ?= $(if $(wildcard $(HAIKU_HEADERS)/os/add-ons/quick_look/QuickLook.h),1,)
 QUICKLOOK_UI_SRC = $(filter-out src/ui/PlayerWindow.cpp src/ui/GoToTimeWindow.cpp \
-	src/ui/InspectorWindow.cpp src/ui/DirectRescue.cpp,$(wildcard src/ui/*.cpp))
+	src/ui/InspectorWindow.cpp src/ui/DirectRescue.cpp src/ui/TopBar.cpp,\
+	$(wildcard src/ui/*.cpp))
 QUICKLOOK_SRC = $(ENGINE_SRC) $(QUICKLOOK_UI_SRC) src/Settings.cpp \
 	src/quicklook/QuickLookAddOn.cpp
 QUICKLOOK_OBJ = $(QUICKLOOK_SRC:%.cpp=$(BUILD)/quicklook/%.o)

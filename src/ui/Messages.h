@@ -46,9 +46,15 @@ enum {
 	kMsgToggleMute			= 'mute',
 	kMsgSelectAudio			= 'saud',	// int32 "index"
 	kMsgCycleAudio			= 'caud',
+	kMsgShowAudioTracks		= 'saut',	// BRect "button": the picker
 
 	// Subtitles
-	kMsgSelectSubtitle		= 'ssub',	// int32 "index", -1 off
+	kMsgSelectSubtitle		= 'ssub',	// int32 "index", -1 off; optional
+										// bool "captions" (closed captions
+										// on or off with it)
+	kMsgShowSubtitleTracks	= 'ssut',	// BRect "button": the picker
+	kMsgToggleSubtitlesShown = 'cctg',	// the CC switch: subtitles off, or
+										// back to what was shown
 	kMsgCycleSubtitle		= 'csub',
 	kMsgToggleCaptions		= 'cc  ',
 	kMsgAddSubtitleFile		= 'asub',

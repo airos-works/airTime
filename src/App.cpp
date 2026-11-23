@@ -211,10 +211,11 @@ App::RefsReceived(BMessage* message)
 	}
 	for (int32 i = 0; message->FindRef("refs", i, &ref) == B_OK; i++) {
 		// The first film may go into the window that asked for it, if it is
-		// empty; every other one gets a window of its own.
+		// empty or asked for one to replace its own (its full screen top bar,
+		// the mobile view); every other one gets a window of its own.
 		PlayerWindow* into = NULL;
 		if (i == 0 && window != NULL && window->Lock()) {
-			if (window->IsEmpty())
+			if (window->IsEmpty() || message->GetBool("replace", false))
 				into = window;
 			window->Unlock();
 		}
@@ -246,8 +247,17 @@ App::MessageReceived(BMessage* message)
 			BMessage* panelMessage = new BMessage(B_REFS_RECEIVED);
 			if (message->FindMessenger("window", &window) == B_OK)
 				panelMessage->AddMessenger("window", window);
+			if (message->GetBool("replace", false))
+				panelMessage->AddBool("replace", true);
 			fOpenPanel->SetMessage(panelMessage);
 			delete panelMessage;
+			// Asked for from a full screen window, which floats above the
+			// others: the panel has to float too to be seen.
+			if (fOpenPanel->Window()->Lock()) {
+				fOpenPanel->Window()->SetFeel(message->GetBool("floating", false)
+					? B_FLOATING_ALL_WINDOW_FEEL : B_NORMAL_WINDOW_FEEL);
+				fOpenPanel->Window()->Unlock();
+			}
 			fOpenPanel->Show();
 			break;
 		}

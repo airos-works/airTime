@@ -46,6 +46,8 @@ ControlBar::ControlBar(BRect frame, bool hud, const BMessenger& target)
 	fShowEnds(true),
 	fShowLCD(true),
 	fShowVolume(true),
+	fScale(1.0f),
+	fFullScreenButtonShown(true),
 	fPressed(PART_NONE),
 	fHover(PART_NONE),
 	fInside(false),
@@ -70,6 +72,42 @@ ControlBar::PreferredHeight(bool hud)
 ControlBar::MinimumWidth(bool hud)
 {
 	return hud ? 420 : 300;
+}
+
+
+float
+ControlBar::Height() const
+{
+	return roundf(PreferredHeight(fHud) * fScale);
+}
+
+
+float
+ControlBar::MinWidth() const
+{
+	return roundf(MinimumWidth(fHud) * fScale);
+}
+
+
+void
+ControlBar::SetScale(float scale)
+{
+	if (scale == fScale)
+		return;
+	fScale = scale;
+	_Layout();
+	Invalidate();
+}
+
+
+void
+ControlBar::SetShowsFullScreenButton(bool shown)
+{
+	if (shown == fFullScreenButtonShown)
+		return;
+	fFullScreenButtonShown = shown;
+	_Layout();
+	Invalidate();
 }
 
 
@@ -199,28 +237,30 @@ ControlBar::_Layout()
 {
 	BRect bounds = Bounds();
 	float width = bounds.Width() + 1;
-	float margin = fHud ? 18 : 12;
+	// Measured as at scale 1, then made larger for touch.
+	const float s = fScale;
+	float margin = (fHud ? 18 : 12) * s;
 
 	// The timeline across the whole width.
-	float trackTop = fHud ? 18 : 14;
-	float trackHeight = fHud ? 6 : 8;
+	float trackTop = roundf((fHud ? 18 : 14) * s);
+	float trackHeight = roundf((fHud ? 6 : 8) * s);
 	fTrack.Set(margin, trackTop, width - margin - 1, trackTop + trackHeight);
-	fTimelineHit.Set(margin - 7, trackTop - 11, width - margin + 6,
-		trackTop + trackHeight + 5);
+	fTimelineHit.Set(margin - 7 * s, trackTop - 11 * s, width - margin + 6 * s,
+		trackTop + trackHeight + 5 * s);
 
 	// The row of controls below it.
-	float row = fHud ? 50 : 43;
-	fShowEnds = width >= (fHud ? 520 : 400);
-	fShowVolume = width >= 260;
+	float row = roundf((fHud ? 50 : 43) * s);
+	fShowEnds = width >= (fHud ? 520 : 400) * s;
+	fShowVolume = width >= 260 * s;
 
-	fSpeaker.Set(margin, row - 8, margin + 16, row + 8);
-	fVolumeTrack.Set(fSpeaker.right + 5, row - 3, fSpeaker.right + 5
-		+ (fHud ? 80 : 64), row + 3);
+	fSpeaker.Set(margin, row - 8 * s, margin + 16 * s, row + 8 * s);
+	fVolumeTrack.Set(fSpeaker.right + 5 * s, row - 3 * s, fSpeaker.right
+		+ 5 * s + (fHud ? 80 : 64) * s, row + 3 * s);
 
-	float endSize = fHud ? 24 : 22;
-	float scanSize = fHud ? 28 : 26;
-	float playSize = fHud ? 34 : 32;
-	float gap = fHud ? 10 : 5;
+	float endSize = roundf((fHud ? 24 : 22) * s);
+	float scanSize = roundf((fHud ? 28 : 26) * s);
+	float playSize = roundf((fHud ? 34 : 32) * s);
+	float gap = roundf((fHud ? 10 : 5) * s);
 	float cluster = scanSize * 2 + playSize + gap * 2;
 	if (fShowEnds)
 		cluster += endSize * 2 + gap * 2;
@@ -242,26 +282,26 @@ ControlBar::_Layout()
 	float clusterRight = x - gap;
 
 	float right = width - margin;
-	if (fHasVideo || fHud) {
-		fFullScreenButton.Set(right - 20, row - 10, right, row + 10);
-		right = fFullScreenButton.left - 10;
+	if ((fHasVideo || fHud) && fFullScreenButtonShown) {
+		fFullScreenButton.Set(right - 20 * s, row - 10 * s, right, row + 10 * s);
+		right = fFullScreenButton.left - 10 * s;
 	} else
 		fFullScreenButton.Set(-100, -100, -90, -90);
 
-	float lcdWidth = right - (clusterRight + 12);
-	if (lcdWidth > (fHud ? 150 : 172))
-		lcdWidth = fHud ? 150 : 172;
-	fShowLCD = lcdWidth >= 96;
+	float lcdWidth = right - (clusterRight + 12 * s);
+	if (lcdWidth > (fHud ? 150 : 172) * s)
+		lcdWidth = (fHud ? 150 : 172) * s;
+	fShowLCD = lcdWidth >= 96 * s;
 	if (fShowLCD)
-		fLCD.Set(right - lcdWidth, row - 11, right, row + 11);
+		fLCD.Set(right - lcdWidth, row - 11 * s, right, row + 11 * s);
 	else
 		fLCD.Set(-100, -100, -90, -90);
 
 	// Hide the volume slider rather than run it into the buttons.
-	float leftLimit = (fShowEnds ? fToStart.left : fRewind.left) - 10;
+	float leftLimit = (fShowEnds ? fToStart.left : fRewind.left) - 10 * s;
 	if (fVolumeTrack.right > leftLimit) {
 		fVolumeTrack.right = leftLimit;
-		if (fVolumeTrack.Width() < 30)
+		if (fVolumeTrack.Width() < 30 * s)
 			fVolumeTrack.Set(-100, -100, -90, -90);
 	}
 }
@@ -273,7 +313,8 @@ ControlBar::_PartFrame(part which) const
 	switch (which) {
 		case PART_TIMELINE:		return fTimelineHit;
 		case PART_SPEAKER:		return fSpeaker;
-		case PART_VOLUME:		return fVolumeTrack.InsetByCopy(-6, -6);
+		case PART_VOLUME:		return fVolumeTrack.InsetByCopy(-6 * fScale,
+									-6 * fScale);
 		case PART_TO_START:		return fToStart;
 		case PART_REWIND:		return fRewind;
 		case PART_PLAY:			return fPlay;
@@ -499,7 +540,7 @@ ControlBar::_DrawTimeline()
 		button_state state = fPressed == PART_TIMELINE ? BUTTON_PRESSED
 			: fHover == PART_TIMELINE ? BUTTON_HOVER : BUTTON_NORMAL;
 		look::playhead(this, BPoint(roundf(x) + 0.5f, fTrack.bottom - 1),
-			fHud ? 12 : 13, state, fHud);
+			roundf((fHud ? 12 : 13) * fScale), state, fHud);
 	}
 }
 
@@ -535,7 +576,7 @@ ControlBar::_DrawLCD()
 		look::lcd(this, fLCD);
 
 	BFont font(be_bold_font);
-	font.SetSize(fHud ? 13 : 12);
+	font.SetSize((fHud ? 13 : 12) * fScale);
 	SetFont(&font);
 	font_height height;
 	font.GetHeight(&height);
@@ -581,10 +622,10 @@ ControlBar::_DrawLCD()
 			rate.SetToFormat("%g×", shownRate);
 	}
 
-	float padding = 7;
+	float padding = 7 * fScale;
 	float timeWidth = font.StringWidth(time.String());
 	BFont small(font);
-	small.SetSize(fHud ? 11 : 10);
+	small.SetSize((fHud ? 11 : 10) * fScale);
 	float rateWidth = rate.Length() > 0 ? small.StringWidth(rate.String()) : 0;
 	if (timeWidth + rateWidth + padding * 3 > fLCD.Width() && fDuration > 0
 		&& fTimeDisplay != 1) {

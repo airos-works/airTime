@@ -22,8 +22,6 @@
 #include <Application.h>
 #include <Bitmap.h>
 #include <FilePanel.h>
-#include <ListView.h>
-#include <StringView.h>
 #include <Menu.h>
 #include <MenuBar.h>
 #include <MenuItem.h>
@@ -46,6 +44,7 @@
 #include "Screens.h"
 #include "Settings.h"
 #include "SkipLookup.h"
+#include "TopBar.h"
 #include "VideoView.h"
 
 
@@ -257,8 +256,15 @@ PlayerWindow::PlayerWindow(BRect frame)
 		true, BMessenger(this));
 	fHud->Hide();
 	fVideo->AddChild(fHud);
+	fTopBar = new TopBar(BRect(0, 0, 640, TopBar::PreferredHeight()),
+		BMessenger(this));
+	fTopBar->Hide();
+	fVideo->AddChild(fTopBar);
+	fOpenButton = new HudButton(BRect(0, 0, 200, 60), "Open…", GLYPH_OPEN,
+		new BMessage(kMsgOpenFile), BMessenger(this));
+	fOpenButton->Hide();
+	fVideo->AddChild(fOpenButton);
 
-	_BuildMobileView();
 	fVideo->SetPlayer(fPlayer);
 	fVideo->SetSubtitleScale(settings().subtitleScale);
 	fControls->SetVolume(settings().volume, settings().muted);
@@ -310,8 +316,8 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 		return B_ENTRY_NOT_FOUND;
 	}
 
-	if (fFullScreen)
-		_SetFullScreen(false);
+	// Full screen stays, for a film opened from its top bar, unless the new
+	// one has no moving picture (below).
 	fPlayer->SetVideoSink(NULL);
 	fPlayer->Close();
 	fVideo->SetPlayer(NULL);
@@ -327,16 +333,21 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 	fPlayer->SetVideoSink(fVideo);
 	status_t status = fPlayer->Open(path.Path(), error);
 	fHasFile = status == B_OK;
+	fLastSubtitleTrack = -1;
+	fLastCaptions = false;
 	if (status != B_OK) {
+		if (fFullScreen)
+			_SetFullScreen(false);
 		SetTitle("airTime");
 		fVideo->SetInfo("", "");
 		fControls->SetMedia(false, false, false);
+		fHud->SetMedia(false, false, false);
+		fTopBar->SetTitle("");
+		_UpdateTopBar();
 		_Layout();
 		return status;
 	}
 	fRef = ref;
-	if (fMobile)
-		_ShowLibrary(false);
 	be_roster->AddToRecentDocuments(&ref, kAppSignature);
 
 	SetTitle(ref.name);
@@ -356,6 +367,7 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 		detail << album;
 	}
 	fVideo->SetInfo(title.String(), detail.String());
+	fTopBar->SetTitle(title.String());
 
 	fControls->SetMedia(true, fPlayer->HasMovingVideo(), fPlayer->HasAudio());
 	fHud->SetMedia(true, true, fPlayer->HasAudio());
@@ -392,8 +404,12 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 		fPlayer->SelectSubtitleTrack(chosen);
 	}
 
+	if (fFullScreen && !fPlayer->HasMovingVideo())
+		_SetFullScreen(false);
 	_Layout();
-	if (!fFullScreen)
+	if (fFullScreen)
+		fResizeAfterFullScreen = true;
+	else
 		_ResizeToVideo(1.0f);
 	_ApplySizeLimits();
 
@@ -403,6 +419,8 @@ PlayerWindow::OpenFile(const entry_ref& ref, bool play, BString* error)
 	}
 	if (play)
 		fPlayer->Play();
+	// The controls stay a moment before they go for the picture.
+	fLastActivity = system_time();
 	_UpdateControls();
 	_LookUpSkipSegments();
 	return B_OK;
@@ -886,88 +904,41 @@ PlayerWindow::_ControlsHeight() const
 }
 
 
-void
-PlayerWindow::_BuildMobileView()
+/*!	Shows or hides `view` without unbalancing its hide count. */
+static void
+set_visible(BView* view, bool visible)
 {
-	auto* header = new BMobileKit::Bar("mobile-header");
-	fBrowse = header->AddAction("library", "Browse", new BMessage('mLib'));
-	header->AddAction("open", "Open…", new BMessage(kMsgOpenFile));
-	header->AddAction("audio", "Audio", new BMessage(kMsgCycleAudio));
-	header->AddAction("subtitles", "Subtitles", new BMessage(kMsgCycleSubtitle));
-	fMobileHeader = header;
-	header->Hide();
-	AddChild(header);
-
-	fLibrary = new BGroupView("video-library", B_VERTICAL);
-	fLibrary->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
-	fLibrary->GroupLayout()->SetInsets(B_USE_DEFAULT_SPACING);
-	fLibraryHeading = new BStringView("heading", "Recently opened");
-	fLibraryHeading->SetFont(be_bold_font);
-	fLibrary->GroupLayout()->AddView(fLibraryHeading);
-	fRecent = new BListView("recent-videos");
-	fRecent->SetSelectionMessage(new BMessage('mVid'));
-	fLibrary->GroupLayout()->AddView(BMobileKit::Scroll("library-scroll", fRecent));
-	fLibrary->Hide();
-	AddChild(fLibrary);
-	fRecent->SetTarget(this);
-
-	auto* bar = new BMobileKit::Bar("mobile-playback");
-	auto skip = [bar](const char* name, const char* label, int seconds) {
-		auto* message = new BMessage(kMsgSeekBy);
-		message->AddInt64("delta", (bigtime_t)seconds * 1000000);
-		bar->AddAction(name, label, message);
-	};
-	skip("rewind", "−10 s", -10);
-	fPlay = bar->AddAction("play", "Play", new BMessage(kMsgTogglePlay));
-	skip("forward", "+10 s", 10);
-	fTimeline = BMobileKit::Slider("timeline", "Position", new BMessage('mPos'), 0, 1000);
-	bar->GroupLayout()->AddView(fTimeline, 3);
-	fMobileControls = bar;
-	bar->Hide();
-	AddChild(bar);
-}
-
-
-void
-PlayerWindow::_ShowLibrary(bool show)
-{
-	if (show) {
-		fRecentRefs.clear();
-		while (BListItem* item = fRecent->RemoveItem((int32)0))
-			delete item;
-		BMessage refs;
-		be_roster->GetRecentDocuments(&refs, 32, NULL, kAppSignature);
-		entry_ref ref;
-		for (int32 i = 0; refs.FindRef("refs", i, &ref) == B_OK; i++) {
-			if (BEntry(&ref).Exists()) {
-				fRecentRefs.push_back(ref);
-				fRecent->AddItem(new BMobileKit::ListItem(ref.name));
-			}
-		}
-		fLibraryHeading->SetText(fRecentRefs.empty()
-			? "Open a video to start your library" : "Recently opened");
-	}
-	fBrowse->SetEnabled(fHasFile);
-	fBrowse->SetLabel(show ? "Player" : "Browse");
-	if (show == !fLibrary->IsHidden(fLibrary))
+	if (view->IsHidden(view) == !visible)
 		return;
-	if (show) {
-		fLibrary->Show();
-		fFrame->Hide();
-		fMobileControls->Hide();
-	} else {
-		fLibrary->Hide();
-		fFrame->Show();
-		fMobileControls->Show();
-	}
+	if (visible)
+		view->Show();
+	else
+		view->Hide();
 }
 
 
+/*!	How much larger the full screen controls are in the mobile view: the
+	controller's play button as large as Mobile Kit's touch targets. */
+float
+PlayerWindow::_TouchScale() const
+{
+	return std::max(1.0f, BMobileKit::TargetSize() / 34.0f);
+}
+
+
+/*!	The mobile view is the full screen view in the window the shell gives
+	it: black, the controller and the top bar floating over the picture and
+	going away while the film plays, and Open… in the middle until there is
+	a film. */
 void
 PlayerWindow::_SetMobileView(bool mobile)
 {
 	if (fMobile == mobile)
 		return;
+	if (fSheet.IsValid()) {
+		fSheet.SendMessage(B_QUIT_REQUESTED);
+		fSheet = BMessenger();
+	}
 	if (mobile) {
 		fDesktopFullScreen = fFullScreen;
 		if (fFullScreen) {
@@ -978,16 +949,21 @@ PlayerWindow::_SetMobileView(bool mobile)
 	}
 	fMobile = mobile;
 	fResizePending = false;
+	if (!mobile)
+		_ShowHud(false);
+
+	float scale = mobile ? _TouchScale() : 1.0f;
+	fHud->SetScale(scale);
+	fTopBar->SetScale(scale);
+	fHud->SetShowsFullScreenButton(!mobile);
+	fVideo->SetFullScreen(mobile);
 	if (mobile) {
 		fControls->Hide();
 		fMenuBar->Hide();
-		fMobileHeader->Show();
-		fMobileControls->Show();
-		_ShowLibrary(!fHasFile);
+		_Layout();
+		fLastActivity = system_time();
+		_ShowHud(true);
 	} else {
-		_ShowLibrary(false);
-		fMobileHeader->Hide();
-		fMobileControls->Hide();
 		fMenuBar->Show();
 		fControls->Show();
 		SetFeel(fAlwaysOnTop ? B_FLOATING_ALL_WINDOW_FEEL : B_NORMAL_WINDOW_FEEL);
@@ -998,6 +974,7 @@ PlayerWindow::_SetMobileView(bool mobile)
 	}
 	_ApplySizeLimits();
 	_Layout();
+	fVideo->MakeFocus(true);
 }
 
 
@@ -1005,40 +982,38 @@ void
 PlayerWindow::_Layout()
 {
 	BRect bounds = Bounds();
-	if (fMobile) {
-		float header = ceilf(fMobileHeader->PreferredSize().height);
-		float controls = ceilf(fMobileControls->PreferredSize().height);
-		fMobileHeader->MoveTo(0, 0);
-		fMobileHeader->ResizeTo(bounds.Width(), header);
-		fLibrary->MoveTo(0, header + 1);
-		fLibrary->ResizeTo(bounds.Width(), bounds.Height() - header - 1);
-		fMobileControls->MoveTo(0, bounds.bottom - controls);
-		fMobileControls->ResizeTo(bounds.Width(), controls);
-		fFrame->MoveTo(0, header + 1);
-		fFrame->ResizeTo(bounds.Width(), fmaxf(0, bounds.Height() - header - controls - 2));
-		fFrame->SetGroove(BRect());
-		fVideo->MoveTo(0, 0);
-		fVideo->ResizeTo(fFrame->Bounds().Width(), fFrame->Bounds().Height());
-		fVideo->SetSkipButtonFloor(-1);
-		fVideo->UpdateWindowOrigin();
-		return;
-	}
 	float menuHeight = _MenuHeight();
 	fFrame->MoveTo(0, menuHeight);
 	fFrame->ResizeTo(bounds.Width(), bounds.Height() - menuHeight);
 	BRect surface = fFrame->Bounds();
 
-	if (fFullScreen) {
+	set_visible(fOpenButton, fMobile && !fHasFile);
+	if (fFullScreen || fMobile) {
 		fVideo->MoveTo(0, 0);
 		fVideo->ResizeTo(surface.Width(), surface.Height());
 		fFrame->SetGroove(BRect(0, 0, -1, -1));
 		BRect video = fVideo->Bounds();
-		float hudWidth = std::min(720.0f, std::max(480.0f,
+		float scale = fHud->Scale();
+		// Closer to the edges on a tablet's smaller screen.
+		float edge = roundf((fMobile ? 12 : 24) * scale);
+		float hudWidth = std::min(720.0f * scale, std::max(480.0f * scale,
 			video.Width() * 0.55f));
-		float hudHeight = ControlBar::PreferredHeight(true);
+		hudWidth = std::min(hudWidth, video.Width() - 2 * edge);
+		float hudHeight = fHud->Height();
 		fHud->ResizeTo(hudWidth, hudHeight);
 		fHud->MoveTo(floorf((video.Width() - hudWidth) / 2),
-			video.bottom - hudHeight - 36);
+			video.bottom - hudHeight - (fMobile ? edge : 36));
+
+		float topWidth = std::min(video.Width() - 2 * edge,
+			std::max(hudWidth, 960.0f * scale));
+		fTopBar->ResizeTo(topWidth, fTopBar->Height());
+		fTopBar->MoveTo(floorf((video.Width() - topWidth) / 2), edge);
+
+		BSize open = fOpenButton->PreferredSize(scale);
+		fOpenButton->ResizeTo(open.width, open.height);
+		fOpenButton->MoveTo(floorf((video.Width() - open.width) / 2),
+			floorf((video.Height() - open.height) / 2));
+
 		fVideo->SetSkipButtonFloor(fHud->Frame().top);
 		fVideo->UpdateWindowOrigin();
 		return;
@@ -1247,6 +1222,8 @@ PlayerWindow::_SetFullScreen(bool fullScreen)
 		_ApplySizeLimits();
 		Show();
 	}
+	bool resize = !fullScreen && fResizeAfterFullScreen;
+	fResizeAfterFullScreen = false;
 	fVideo->SetFullScreen(fullScreen);
 	fControls->SetFullScreen(fullScreen);
 	fHud->SetFullScreen(fullScreen);
@@ -1254,6 +1231,9 @@ PlayerWindow::_SetFullScreen(bool fullScreen)
 	fVideo->MakeFocus(true);
 	fIgnoreResize--;
 	fResizePending = false;
+	// Another film was opened in full screen: the window was the last one's.
+	if (resize && fHasFile)
+		_ResizeToVideo(1.0f);
 }
 
 
@@ -1265,13 +1245,16 @@ PlayerWindow::_ShowHud(bool show)
 	fHudShown = show;
 	if (show) {
 		_Layout();
+		_UpdateTopBar();
 		fHud->Show();
-		fVideo->SetCoveredBottom(fHud->Frame().top);
+		fTopBar->Show();
+		fVideo->SetCovered(fTopBar->Frame().bottom, fHud->Frame().top);
 		be_app->ShowCursor();
 	} else {
 		fHud->Hide();
-		fVideo->SetCoveredBottom(-1);
-		if (fFullScreen)
+		fTopBar->Hide();
+		fVideo->SetCovered(-1, -1);
+		if (fFullScreen || fMobile)
 			be_app->ObscureCursor();
 	}
 }
@@ -1283,6 +1266,7 @@ PlayerWindow::_ShowHud(bool show)
 void
 PlayerWindow::_UpdateControls()
 {
+	_UpdateTopBar();
 	if (!fHasFile) {
 		fControls->SetMedia(false, false, false);
 		return;
@@ -1295,16 +1279,6 @@ PlayerWindow::_UpdateControls()
 	if (!fScrubbing) {
 		fControls->SetPosition(position, duration);
 		fHud->SetPosition(position, duration);
-	}
-	if (fMobile) {
-		const char* label = playing ? "Pause" : "Play";
-		if (strcmp(fPlay->Label(), label) != 0)
-			fPlay->SetLabel(label);
-		BPoint where;
-		uint32 buttons;
-		fTimeline->GetMouse(&where, &buttons, false);
-		if (buttons == 0 && duration > 0)
-			fTimeline->SetPosition((float)((double)position / duration));
 	}
 	fControls->SetPlaying(playing);
 	fHud->SetPlaying(playing);
@@ -1383,13 +1357,20 @@ PlayerWindow::_Pulse()
 			fPlayer->SetRate(rate);
 	}
 
-	// The full screen controller goes away when the mouse rests.
-	if (fFullScreen && fHudShown && !fHud->IsTracking()
+	// The full screen controls go away when the mouse rests, unless it
+	// rests on them. In the mobile view they go while the film plays (a
+	// finger leaves the pointer where it last touched).
+	bool hides = fFullScreen || (fMobile && fHasFile && fPlayer->IsPlaying()
+		&& fPlayer->HasMovingVideo());
+	if (hides && fHudShown && !fHud->IsTracking() && !fTopBar->IsTracking()
 		&& now - fLastActivity > kHudTimeout) {
 		BPoint where;
 		uint32 buttons;
 		fHud->GetMouse(&where, &buttons, false);
-		if (!fHud->Bounds().Contains(where))
+		bool over = fHud->Bounds().Contains(where);
+		fTopBar->GetMouse(&where, &buttons, false);
+		over = over || fTopBar->Bounds().Contains(where);
+		if (fMobile || !over)
 			_ShowHud(false);
 	}
 
@@ -1637,6 +1618,13 @@ PlayerWindow::_HandleClick(int32 clicks)
 {
 	if (!fHasFile)
 		return;
+	if (fMobile) {
+		// A tap on the picture shows the controls or puts them away; the
+		// play button plays.
+		fLastActivity = system_time();
+		_ShowHud(!fHudShown);
+		return;
+	}
 	if (clicks >= 2) {
 		// The first click of the two toggled playing; undo that.
 		fPlayer->TogglePlaying();
@@ -1740,6 +1728,188 @@ PlayerWindow::_CycleAudio()
 }
 
 
+/*!	A choice in a track picker: a check mark on the one in use. */
+static BString
+choice_label(const BString& label, bool current)
+{
+	if (!current)
+		return label;
+	BString marked("✓ ");
+	marked << label;
+	return marked;
+}
+
+
+void
+PlayerWindow::_ShowAudioPicker(BRect button)
+{
+	if (!fHasFile)
+		return;
+	const std::vector<TrackInfo>& tracks = fPlayer->AudioTracks();
+	int current = fPlayer->CurrentAudioTrack();
+	if (fMobile) {
+		BMobileKit::ActionSheet* sheet
+			= new BMobileKit::ActionSheet(this, "Audio");
+		for (size_t i = 0; i < tracks.size(); i++) {
+			BMessage message(kMsgSelectAudio);
+			message.AddInt32("index", (int32)i);
+			sheet->AddAction(choice_label(tracks[i].Label((int)i + 1),
+				(int)i == current).String(), message);
+		}
+		fSheet = BMessenger(sheet);
+		sheet->Open();
+		return;
+	}
+	BPopUpMenu* menu = new BPopUpMenu("audio", false, false);
+	for (size_t i = 0; i < tracks.size(); i++) {
+		BMessage* message = new BMessage(kMsgSelectAudio);
+		message->AddInt32("index", (int32)i);
+		BMenuItem* menuItem = new BMenuItem(tracks[i].Label((int)i + 1)
+			.String(), message);
+		menuItem->SetMarked((int)i == current);
+		menu->AddItem(menuItem);
+	}
+	menu->SetTargetForItems(this);
+	menu->SetAsyncAutoDestruct(true);
+	menu->Go(button.LeftBottom() + BPoint(0, 4), true, true, button, true);
+}
+
+
+/*!	Off, each subtitle track and the closed captions, one of them at a time,
+	and a subtitle file to add. */
+void
+PlayerWindow::_ShowSubtitlePicker(BRect button)
+{
+	if (!fHasFile)
+		return;
+	std::vector<TrackInfo> tracks = fPlayer->SubtitleTracks();
+	int current = fPlayer->CurrentSubtitleTrack();
+	bool captions = fPlayer->CaptionsEnabled();
+	struct Choice {
+		BString label;
+		bool current;
+		BMessage message;
+	};
+	std::vector<Choice> choices;
+	auto add = [&](const BString& label, bool marked, int32 index,
+			bool withCaptions) {
+		BMessage message(kMsgSelectSubtitle);
+		message.AddInt32("index", index);
+		message.AddBool("captions", withCaptions);
+		choices.push_back({label, marked, message});
+	};
+	add("Off", current < 0 && !captions, -1, false);
+	for (size_t i = 0; i < tracks.size(); i++)
+		add(tracks[i].Label((int)i + 1), (int)i == current, (int32)i, false);
+	if (fPlayer->HasCaptions())
+		add("Closed Captions", captions, -1, true);
+
+	if (fMobile) {
+		BMobileKit::ActionSheet* sheet
+			= new BMobileKit::ActionSheet(this, "Subtitles");
+		for (const Choice& choice : choices) {
+			sheet->AddAction(choice_label(choice.label, choice.current)
+				.String(), choice.message);
+		}
+		sheet->AddAction("Add Subtitle File…", BMessage(kMsgAddSubtitleFile));
+		fSheet = BMessenger(sheet);
+		sheet->Open();
+		return;
+	}
+	BPopUpMenu* menu = new BPopUpMenu("subtitles", false, false);
+	for (const Choice& choice : choices) {
+		BMenuItem* menuItem = new BMenuItem(choice.label.String(),
+			new BMessage(choice.message));
+		menuItem->SetMarked(choice.current);
+		menu->AddItem(menuItem);
+	}
+	menu->AddSeparatorItem();
+	menu->AddItem(item("Add Subtitle File…", kMsgAddSubtitleFile));
+	menu->SetTargetForItems(this);
+	menu->SetAsyncAutoDestruct(true);
+	menu->Go(button.LeftBottom() + BPoint(0, 4), true, true, button, true);
+}
+
+
+/*!	The CC switch: whatever subtitles or captions are shown go away, and
+	come back as they were; the first time, the track in the preferred
+	language, else the first one, else the closed captions. */
+void
+PlayerWindow::_ToggleSubtitlesShown()
+{
+	if (!fHasFile)
+		return;
+	std::vector<TrackInfo> tracks = fPlayer->SubtitleTracks();
+	int current = fPlayer->CurrentSubtitleTrack();
+	bool hasCaptions = fPlayer->HasCaptions();
+	bool captions = fPlayer->CaptionsEnabled();
+	if (current >= 0 || captions) {
+		fLastSubtitleTrack = current;
+		fLastCaptions = captions;
+		fPlayer->SelectSubtitleTrack(-1);
+		if (captions)
+			fPlayer->SetCaptionsEnabled(false);
+		settings().subtitleLanguage = "off";
+		_ShowMessage("Subtitles off");
+	} else {
+		int track = -1;
+		bool showCaptions = false;
+		if (fLastSubtitleTrack >= 0 && fLastSubtitleTrack < (int)tracks.size()) {
+			track = fLastSubtitleTrack;
+			showCaptions = fLastCaptions && hasCaptions;
+		} else if (fLastCaptions && hasCaptions)
+			showCaptions = true;
+		else if (!tracks.empty()) {
+			track = 0;
+			BString preferred = fPlayer->AudioTracks().empty() ? BString()
+				: fPlayer->AudioTracks()[std::max(0,
+					fPlayer->CurrentAudioTrack())].language;
+			for (size_t i = 0; i < tracks.size(); i++) {
+				if (preferred.Length() > 0 && same_language(
+						tracks[i].language.String(), preferred.String())) {
+					track = (int)i;
+					break;
+				}
+			}
+		} else if (hasCaptions)
+			showCaptions = true;
+		else {
+			_ShowMessage("No subtitles");
+			return;
+		}
+		if (track >= 0) {
+			fPlayer->SelectSubtitleTrack(track);
+			if (tracks[track].language.Length() > 0)
+				settings().subtitleLanguage = tracks[track].language;
+		}
+		if (showCaptions)
+			fPlayer->SetCaptionsEnabled(true);
+		if (track >= 0)
+			_ShowMessage("Subtitles: %s", tracks[track].Label(track + 1).String());
+		else
+			_ShowMessage("Closed captions on");
+	}
+	fVideo->Refresh();
+	_UpdateTopBar();
+}
+
+
+void
+PlayerWindow::_UpdateTopBar()
+{
+	if (!fHasFile) {
+		fTopBar->SetTracks(false, 0, 0, false);
+		return;
+	}
+	bool captions = fPlayer->HasCaptions();
+	int subtitles = (int)fPlayer->SubtitleTracks().size();
+	fTopBar->SetTracks(true, (int)fPlayer->AudioTracks().size(),
+		subtitles + (captions ? 1 : 0),
+		fPlayer->CurrentSubtitleTrack() >= 0
+			|| (captions && fPlayer->CaptionsEnabled()));
+}
+
+
 void
 PlayerWindow::_GoToChapter(int step)
 {
@@ -1811,23 +1981,6 @@ PlayerWindow::MessageReceived(BMessage* message)
 		case BMobileKit::B_MOBILE_VIEW_CHANGED:
 			_SetMobileView(message->GetBool("mobile", false));
 			break;
-		case 'mLib':
-			_ShowLibrary(fLibrary->IsHidden(fLibrary));
-			break;
-		case 'mVid':
-		{
-			int32 index = fRecent->CurrentSelection();
-			if (index >= 0 && index < (int32)fRecentRefs.size()) {
-				BString error;
-				if (OpenFile(fRecentRefs[index], true, &error) != B_OK)
-					(new BAlert("Open video", error.String(), "OK"))->Go(NULL);
-			}
-			break;
-		}
-		case 'mPos':
-			if (fHasFile)
-				fPlayer->Seek((bigtime_t)(fTimeline->Position() * (double)fPlayer->Duration()), true);
-			break;
 		case kMsgPulse:
 			_Pulse();
 			break;
@@ -1835,7 +1988,7 @@ PlayerWindow::MessageReceived(BMessage* message)
 		case kMsgPlayerStateChanged:
 		case kMsgPlayerEnded:
 			_UpdateControls();
-			if (message->what == kMsgPlayerEnded && fFullScreen)
+			if (message->what == kMsgPlayerEnded && (fFullScreen || fMobile))
 				_ShowHud(true);
 			break;
 		case kMsgPlayerTracksChanged:
@@ -2021,21 +2174,41 @@ PlayerWindow::MessageReceived(BMessage* message)
 		case kMsgCycleAudio:
 			_CycleAudio();
 			break;
+		case kMsgShowAudioTracks:
+			fLastActivity = system_time();
+			_ShowAudioPicker(message->GetRect("button", BRect()));
+			break;
+		case kMsgShowSubtitleTracks:
+			fLastActivity = system_time();
+			_ShowSubtitlePicker(message->GetRect("button", BRect()));
+			break;
+		case kMsgToggleSubtitlesShown:
+			fLastActivity = system_time();
+			_ToggleSubtitlesShown();
+			break;
 		case kMsgSelectSubtitle:
 		{
 			int32 index = message->GetInt32("index", -1);
 			fPlayer->SelectSubtitleTrack(index);
+			// From a picker: the closed captions are one of its choices.
+			bool captions;
+			bool hasCaptions = message->FindBool("captions", &captions) == B_OK;
+			if (hasCaptions && fPlayer->HasCaptions())
+				fPlayer->SetCaptionsEnabled(captions);
 			std::vector<TrackInfo> tracks = fPlayer->SubtitleTracks();
 			if (index >= 0 && index < (int32)tracks.size()) {
 				_ShowMessage("Subtitles: %s",
 					tracks[index].Label(index + 1).String());
 				if (tracks[index].language.Length() > 0)
 					settings().subtitleLanguage = tracks[index].language;
-			} else {
+			} else if (hasCaptions && captions)
+				_ShowMessage("Closed captions on");
+			else {
 				_ShowMessage("Subtitles off");
 				settings().subtitleLanguage = "off";
 			}
 			fVideo->Refresh();
+			_UpdateTopBar();
 			break;
 		}
 		case kMsgCycleSubtitle:
@@ -2057,6 +2230,12 @@ PlayerWindow::MessageReceived(BMessage* message)
 					new BMessage('subr'));
 				fSubtitlePanel->Window()->SetTitle(
 					"airTime: Add Subtitle File");
+			}
+			// Over a full screen window, which floats above the others.
+			if (fSubtitlePanel->Window()->Lock()) {
+				fSubtitlePanel->Window()->SetFeel(fFullScreen
+					? B_FLOATING_ALL_WINDOW_FEEL : B_NORMAL_WINDOW_FEEL);
+				fSubtitlePanel->Window()->Unlock();
 			}
 			if (fHasFile) {
 				BEntry entry(&fRef);
@@ -2088,8 +2267,13 @@ PlayerWindow::MessageReceived(BMessage* message)
 			_SetFullScreen(false);
 			break;
 		case kMsgControlsActivity:
+			// The pointer moving over the picture means nothing on a touch
+			// screen, where it only moves to where a finger lands; a tap
+			// shows the controls (_HandleClick).
+			if (fMobile && message->HasPoint("where"))
+				break;
 			fLastActivity = system_time();
-			if (fFullScreen && !fHudShown)
+			if ((fFullScreen || fMobile) && !fHudShown)
 				_ShowHud(true);
 			break;
 		case kMsgSize:
@@ -2192,6 +2376,11 @@ PlayerWindow::MessageReceived(BMessage* message)
 		{
 			BMessage forward(*message);
 			forward.AddMessenger("window", BMessenger(this));
+			// The panel over a full screen window, which floats.
+			forward.AddBool("floating", fFullScreen);
+			// The mobile view has one window: the film replaces this one.
+			if (fMobile && !forward.HasBool("replace"))
+				forward.AddBool("replace", true);
 			be_app->PostMessage(&forward);
 			break;
 		}

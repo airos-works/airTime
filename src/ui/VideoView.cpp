@@ -288,14 +288,16 @@ VideoView::Refresh()
 void
 VideoView::SetFullScreen(bool fullScreen)
 {
+	if (fullScreen != fFullScreen && fAudioOnly)
+		Invalidate();
 	fFullScreen = fullScreen;
 	if (!fullScreen)
-		SetCoveredBottom(-1);
+		SetCovered(-1, -1);
 }
 
 
 void
-VideoView::SetCoveredBottom(float top)
+VideoView::SetCovered(float topBarBottom, float top)
 {
 	BRect video = VideoFrame();
 	int rows = 0;
@@ -305,7 +307,7 @@ VideoView::SetCoveredBottom(float top)
 		// A child view over the picture: the frame buffer copy would paint
 		// over it, so the server draws while it is there.
 		std::lock_guard<std::timed_mutex> lock(fDirectLock);
-		fCovered = top >= 0;
+		fCovered = top >= 0 || topBarBottom >= 0;
 	}
 	{
 		std::lock_guard<std::mutex> render(fRenderLock);
@@ -821,7 +823,8 @@ VideoView::_DrawEmpty(BRect updateRect)
 	SetHighColor(0, 0, 0);
 	FillRect(updateRect);
 	BRect bounds = Bounds();
-	if (bounds.Height() < 60)
+	// Full screen (the mobile view) has its own Open… button over this.
+	if (bounds.Height() < 60 || fFullScreen)
 		return;
 
 	BFont font(be_bold_font);
@@ -849,6 +852,34 @@ void
 VideoView::_DrawAudioOnly(BRect updateRect)
 {
 	BRect bounds = Bounds();
+	if (fFullScreen) {
+		// The mobile view: the title and artist in the middle of the dark,
+		// between the full screen controls.
+		SetHighColor(0, 0, 0);
+		FillRect(updateRect);
+		BFont font(be_bold_font);
+		font.SetSize(roundf(fmaxf(18.0f, bounds.Height() / 24)));
+		BString title(fTitle);
+		font.TruncateString(&title, B_TRUNCATE_END, bounds.Width() - 48);
+		BFont small(be_plain_font);
+		small.SetSize(roundf(font.Size() * 0.7f));
+		BString detail(fDetail);
+		small.TruncateString(&detail, B_TRUNCATE_END, bounds.Width() - 48);
+		float center = (bounds.left + bounds.right) / 2;
+		float middle = roundf((bounds.top + bounds.bottom) / 2);
+		SetDrawingMode(B_OP_OVER);
+		SetFont(&font);
+		SetHighColor(232, 232, 236);
+		DrawString(title.String(), BPoint(roundf(center
+			- font.StringWidth(title.String()) / 2), middle));
+		SetFont(&small);
+		SetHighColor(150, 150, 156);
+		DrawString(detail.String(), BPoint(roundf(center
+			- small.StringWidth(detail.String()) / 2),
+			middle + roundf(font.Size() * 1.3f)));
+		SetDrawingMode(B_OP_COPY);
+		return;
+	}
 	look::surface(this, updateRect);
 
 	BRect panel = bounds.InsetByCopy(12, 10);
@@ -917,7 +948,9 @@ VideoView::MouseDown(BPoint where)
 		fTarget.SendMessage(&message);
 		return;
 	}
-	if (fAudioOnly)
+	// Music has no picture to click, except in the mobile view, where a tap
+	// brings the controls back.
+	if (fAudioOnly && !fFullScreen)
 		return;
 	bigtime_t now = system_time();
 	if (_InSkipButton(where)) {

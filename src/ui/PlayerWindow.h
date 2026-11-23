@@ -14,11 +14,6 @@
 #include "SkipSegments.h"
 
 
-class BButton;
-class BGroupView;
-class BListView;
-class BSlider;
-class BStringView;
 class BFilePanel;
 class BMenu;
 class BMenuBar;
@@ -30,6 +25,8 @@ namespace airtime {
 
 class ControlBar;
 class FrameView;
+class HudButton;
+class TopBar;
 class VideoView;
 
 
@@ -71,9 +68,8 @@ private:
 			BMenu*				_BuildSpeedMenu(const char* name);
 			void				_ShowContextMenu(BPoint where);
 
-			void				_BuildMobileView();
 			void				_SetMobileView(bool mobile);
-			void				_ShowLibrary(bool show);
+			float				_TouchScale() const;
 			void				_Layout();
 			float				_MenuHeight() const;
 			float				_ControlsHeight() const;
@@ -101,6 +97,10 @@ private:
 			void				_AddSubtitleFile(const entry_ref& ref);
 			void				_CycleSubtitles();
 			void				_CycleAudio();
+			void				_ShowAudioPicker(BRect button);
+			void				_ShowSubtitlePicker(BRect button);
+			void				_ToggleSubtitlesShown();
+			void				_UpdateTopBar();
 			void				_GoToChapter(int step);
 			void				_ApplyPreferences();
 			bool				_HandleScripting(BMessage* message);
@@ -125,23 +125,26 @@ private:
 			BMenu*				fSubtitleSizeMenu;
 			BMenuItem*			fPlayItem;
 
+			// The mobile view (air/OS Mobile's shell): the window fills the
+			// screen between the shell's panels and looks like full screen.
 			bool				fMobile = false;
 			bool				fDesktopFullScreen = false;
 			BRect				fDesktopVideoFrame;
-			BGroupView*			fMobileHeader;
-			BGroupView*			fMobileControls;
-			BGroupView*			fLibrary;
-			BButton*			fBrowse;
-			BButton*			fPlay;
-			BSlider*			fTimeline;
-			BListView*			fRecent;
-			BStringView*		fLibraryHeading;
-			std::vector<entry_ref> fRecentRefs;
+			// A track picker open in the mobile view, closed when it ends.
+			BMessenger			fSheet;
+			// Opened while in full screen: fit the window to the new film
+			// when full screen ends.
+			bool				fResizeAfterFullScreen = false;
+			// What the CC switch turns back on.
+			int					fLastSubtitleTrack = -1;
+			bool				fLastCaptions = false;
 
 			FrameView*			fFrame;
 			VideoView*			fVideo;
 			ControlBar*			fControls;
 			ControlBar*			fHud;
+			TopBar*				fTopBar;
+			HudButton*			fOpenButton;
 
 			BMessageRunner*		fPulseRunner;
 			int32				fPulseCount;

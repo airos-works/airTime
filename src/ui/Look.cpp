@@ -307,6 +307,73 @@ glyph(BView* view, glyph_kind kind, BRect rect, rgb_color glyphColor)
 			}
 			break;
 		}
+		case GLYPH_OPEN:
+		{
+			// A folder: a tab on the back, the front a little lower.
+			const float back[] = {0.08f, 0.22f, 0.38f, 0.22f, 0.46f, 0.32f,
+				0.92f, 0.32f, 0.92f, 0.80f, 0.08f, 0.80f};
+			view->SetHighColor(mix(glyphColor, color(0, 0, 0, glyphColor.alpha),
+				0.35f));
+			fill_polygon(view, rect, back, 6);
+			view->SetHighColor(glyphColor);
+			const float front[] = {0.08f, 0.42f, 0.92f, 0.42f, 0.92f, 0.80f,
+				0.08f, 0.80f};
+			fill_polygon(view, rect, front, 4);
+			break;
+		}
+		case GLYPH_AUDIO_TRACK:
+		{
+			// Two notes joined by a beam.
+			float pen = fmaxf(1.2f, roundf(rect.Width() / 10.0f));
+			BRect head(map_point(rect, 0.10f, 0.66f), map_point(rect, 0.40f,
+				0.90f));
+			view->FillEllipse(head);
+			view->FillEllipse(head.OffsetByCopy(rect.Width() * 0.46f,
+				-rect.Height() * 0.08f));
+			float stem1 = head.right - pen / 2;
+			float stem2 = stem1 + rect.Width() * 0.46f;
+			float lift = rect.Height() * 0.08f;
+			float middle = head.top + head.Height() / 2;
+			float beam = rect.top + rect.Height() * 0.14f;
+			float thick = rect.Height() * 0.16f;
+			view->SetPenSize(pen);
+			view->StrokeLine(BPoint(stem1, middle), BPoint(stem1, beam + lift));
+			view->StrokeLine(BPoint(stem2, middle - lift), BPoint(stem2, beam));
+			BShape shape;
+			shape.MoveTo(BPoint(stem1 - pen / 2, beam + lift));
+			shape.LineTo(BPoint(stem2 + pen / 2, beam));
+			shape.LineTo(BPoint(stem2 + pen / 2, beam + thick));
+			shape.LineTo(BPoint(stem1 - pen / 2, beam + lift + thick));
+			shape.Close();
+			view->FillShape(&shape);
+			break;
+		}
+		case GLYPH_SUBTITLES:
+		{
+			// A box with two short lines of text along its bottom, on
+			// whole pixels so that they stay apart when small.
+			float pen = fmaxf(1.0f, roundf(rect.Width() / 12.0f));
+			view->SetPenSize(pen);
+			BRect box(roundf(rect.left + rect.Width() * 0.04f),
+				roundf(rect.top + rect.Height() * 0.16f),
+				roundf(rect.left + rect.Width() * 0.96f),
+				roundf(rect.top + rect.Height() * 0.84f));
+			float radius = roundf(rect.Width() * 0.14f);
+			view->StrokeRoundRect(box, radius, radius);
+			float line = fmaxf(1.0f, roundf(rect.Height() / 12.0f));
+			float inset = roundf(box.Width() * 0.18f);
+			float bottom = box.bottom - roundf(box.Height() * 0.22f);
+			float top = bottom - line;
+			float split = roundf(box.left + box.Width() * 0.58f);
+			view->FillRect(BRect(box.left + inset, top, split - 2, bottom - 1));
+			view->FillRect(BRect(split + 1, top, box.right - inset,
+				bottom - 1));
+			top -= line + fmaxf(2.0f, line);
+			view->FillRect(BRect(box.left + inset + roundf(box.Width() * 0.12f),
+				top, box.right - inset - roundf(box.Width() * 0.12f),
+				top + line - 1));
+			break;
+		}
 	}
 	view->PopState();
 }

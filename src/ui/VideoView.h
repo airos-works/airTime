@@ -49,8 +49,11 @@ public:
 			// Draw the last picture again (subtitles or size changed).
 			void				Refresh();
 			void				SetFullScreen(bool fullScreen);
-			// The part of the view covered by the full screen controller.
-			void				SetCoveredBottom(float top);
+			// The parts of the view covered by the full screen controls:
+			// the top bar down to `topBarBottom`, the controller from
+			// `controllerTop` down; -1 for either that is not shown.
+			void				SetCovered(float topBarBottom,
+									float controllerTop);
 
 			// From the window's DirectConnected(): where the frame buffer
 			// is and which parts of the window are visible in it.

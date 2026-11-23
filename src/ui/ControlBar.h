@@ -43,6 +43,14 @@ public:
 			int					TimeDisplay() const { return fTimeDisplay; }
 			void				SetTitle(const char* title);
 			bool				IsTracking() const { return fPressed != PART_NONE; }
+			// Everything larger by `scale`, for fingers (the mobile view).
+			void				SetScale(float scale);
+			float				Scale() const { return fScale; }
+			float				Height() const;
+			float				MinWidth() const;
+			// Whether the full screen button is offered (not in the mobile
+			// view, where the window always fills the screen).
+			void				SetShowsFullScreenButton(bool shown);
 
 	virtual	void				AttachedToWindow();
 	virtual	void				Draw(BRect updateRect);
@@ -114,6 +122,8 @@ private:
 			bool				fShowEnds;
 			bool				fShowLCD;
 			bool				fShowVolume;
+			float				fScale;
+			bool				fFullScreenButtonShown;
 
 			part				fPressed;
 			part				fHover;

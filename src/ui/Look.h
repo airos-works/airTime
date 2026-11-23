@@ -39,7 +39,10 @@ enum glyph_kind {
 	GLYPH_SPEAKER,
 	GLYPH_SPEAKER_MUTED,
 	GLYPH_STEP_BACK,
-	GLYPH_STEP_FORWARD
+	GLYPH_STEP_FORWARD,
+	GLYPH_OPEN,			// a folder
+	GLYPH_AUDIO_TRACK,	// a sound wave
+	GLYPH_SUBTITLES		// a caption box with lines of text
 };
 
 namespace look {
